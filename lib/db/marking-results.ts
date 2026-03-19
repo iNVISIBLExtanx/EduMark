@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function getMarkingResultsBySubmission(submissionId: string) {
-  const supabase = createServerClient();
+  const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('marking_results')
     .select('*')

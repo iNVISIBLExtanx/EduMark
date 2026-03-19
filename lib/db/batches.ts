@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function getBatchesByTutor(tutorId: string) {
-  const supabase = createServerClient();
+  const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('batches')
     .select('id, name, status, medium, total_papers, marked_papers, created_at')
@@ -12,7 +12,7 @@ export async function getBatchesByTutor(tutorId: string) {
 }
 
 export async function getBatchById(batchId: string, tutorId: string) {
-  const supabase = createServerClient();
+  const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('batches')
     .select('*')

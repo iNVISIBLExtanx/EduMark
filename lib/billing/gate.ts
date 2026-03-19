@@ -9,7 +9,7 @@ export interface BillingStatus {
 }
 
 export async function getBillingStatus(userId: string): Promise<BillingStatus> {
-  const supabase = createServerClient();
+  const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('tutors')
     .select('plan, ai_minutes_used, ai_minutes_limit, subscription_status, billing_period_end')

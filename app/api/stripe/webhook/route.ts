@@ -2,6 +2,7 @@ import { stripe } from '@/lib/stripe/client';
 import { createServiceRoleClient } from '@/lib/supabase/service';
 import { PLAN_AI_MINUTES } from '@/lib/stripe/plans';
 import { NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
     return new Response('Missing stripe-signature header', { status: 400 });
   }
 
-  let event;
+  let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(
       rawBody,
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
-        const session = event.data.object;
+        const session = event.data.object as Stripe.Checkout.Session;
         const userId = session.metadata?.supabase_user_id;
         if (!userId) break;
 
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
             ai_minutes_limit: PLAN_AI_MINUTES[plan],
             ai_minutes_used: 0,
             subscription_status: 'active',
-            billing_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+            billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
           }).eq('id', userId);
         }
 
@@ -67,29 +68,31 @@ export async function POST(req: Request) {
       }
 
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object;
-        const sub = await stripe.subscriptions.retrieve(invoice.subscription as string);
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = (invoice as unknown as { subscription: string }).subscription;
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
 
         await supabase.from('tutors').update({
           ai_minutes_used: 0,
           subscription_status: 'active',
-          billing_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+          billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
         }).eq('stripe_subscription_id', sub.id);
         break;
       }
 
       case 'invoice.payment_failed': {
-        const invoice = event.data.object;
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = (invoice as unknown as { subscription: string }).subscription;
         await supabase.from('tutors').update({
           subscription_status: 'past_due',
-        }).eq('stripe_subscription_id', invoice.subscription as string);
+        }).eq('stripe_subscription_id', subscriptionId);
         break;
       }
 
       case 'customer.subscription.updated': {
-        const sub = event.data.object;
+        const sub = event.data.object as Stripe.Subscription;
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
         const priceId = sub.items.data[0].price.id;
@@ -99,13 +102,13 @@ export async function POST(req: Request) {
           plan,
           ai_minutes_limit: PLAN_AI_MINUTES[plan],
           subscription_status: sub.status,
-          billing_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+          billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
         }).eq('stripe_subscription_id', sub.id);
         break;
       }
 
       case 'customer.subscription.deleted': {
-        const sub = event.data.object;
+        const sub = event.data.object as Stripe.Subscription;
         await supabase.from('tutors').update({
           plan: 'free',
           ai_minutes_limit: 10,

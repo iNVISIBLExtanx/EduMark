@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function getMarkingSchemeByPaper(paperId: string) {
-  const supabase = createServerClient();
+  const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('marking_schemes')
     .select('*')
