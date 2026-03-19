@@ -9,7 +9,13 @@ Claude Code must follow this structure and create new files in the correct place
 - **hooks/**         — Client-side data fetching & state hooks (SWR)
 - **lib/**           — Domain logic, integrations, and typed data access
 - **supabase/**      — SQL migrations, seed data, and generated types
+- **__mocks__/**     — Shared test mocks (Supabase, Stripe, Anthropic)
 - **.claude/rules/** — Instruction files for Claude Code (this folder)
+
+## Testing
+- Tests live **next to** the file they test: `foo.ts` → `foo.test.ts`
+- Shared mocks in `__mocks__/` (supabase, stripe, anthropic)
+- See `.claude/rules/testing.md` for full testing strategy
 
 ## Folder Tree
 

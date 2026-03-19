@@ -12,6 +12,7 @@ AI-powered essay marking SaaS for Sri Lankan A/L tutors. Tutors upload handwritt
 - **Data Fetching (client)**: SWR -- all client data fetching goes through `hooks/` -- NEVER fetch inside `page.tsx`
 - **Auth**: Supabase Auth + Google OAuth
 - **Billing**: Stripe -- monthly LKR subscriptions, payouts to foreign bank account
+- **Testing**: Vitest + @testing-library/react -- every feature must have tests
 
 ## Key Conventions (always apply)
 - No data fetching in `page.tsx` -- use SWR hooks from `hooks/` only
@@ -41,6 +42,7 @@ When starting a task, read the relevant rule file first:
 | Stripe billing & AI minutes model       | `.claude/rules/billing.md`              |
 | Stripe API integration & webhook setup  | `.claude/rules/stripe-integration.md`   |
 | Feature gating & access control         | `.claude/rules/feature-gating.md`       |
+| Testing strategy & Vitest setup         | `.claude/rules/testing.md`              |
 
 ## Build & Dev Commands
 ```bash
@@ -48,6 +50,9 @@ pnpm dev          # local dev (Next.js + Supabase local)
 pnpm build        # production build
 pnpm lint         # ESLint
 pnpm type-check   # tsc --noEmit
+pnpm test         # run all tests (Vitest)
+pnpm test:watch   # watch mode
+pnpm test:coverage # coverage report
 supabase start    # start local Supabase stack
 supabase db push  # apply migrations
 stripe listen --forward-to localhost:3000/api/stripe/webhook  # local webhook testing
