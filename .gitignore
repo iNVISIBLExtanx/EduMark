@@ -31,6 +31,10 @@ yarn-error.log*
 # env files
 .env
 .env*.local
+.env.mcp
+
+# claude code local settings (contains secrets)
+.claude/settings.local.json
 
 # MCP config (contains secrets)
 .mcp.json
