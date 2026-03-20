@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Noto_Sans_Sinhala, Noto_Sans_Tamil, Geist } from 'next/font/google';
 import './globals.css';
 import { cn } from "@/lib/utils";
+import { SWRProvider } from '@/components/providers/SWRProvider';
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
@@ -30,7 +31,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn("font-sans", geist.variable)}>
       <body className={`${sinhala.variable} ${tamil.variable} antialiased`}>
-        {children}
+        <SWRProvider>
+          {children}
+        </SWRProvider>
       </body>
     </html>
   );
