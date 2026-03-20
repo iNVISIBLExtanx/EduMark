@@ -3,7 +3,7 @@
 -- =============================================================
 
 -- ─── Extensions ──────────────────────────────────────────────
-CREATE EXTENSION IF NOT EXISTS "pgvector" WITH SCHEMA "extensions";
+CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "extensions";
 
 -- ─── Tables (in FK-dependency order) ─────────────────────────
 
