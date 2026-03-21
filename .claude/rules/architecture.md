@@ -68,6 +68,7 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   └── QuestionFeedbackCard.tsx
 │   ├── billing/
 │   │   ├── AiMinutesBar.tsx
+│   │   ├── PastDueBanner.tsx
 │   │   ├── PricingTable.tsx
 │   │   └── UpgradeModal.tsx
 │   └── shared/
@@ -91,6 +92,7 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── db/
 │   │   ├── tutors.ts
 │   │   ├── batches.ts
+│   │   ├── billing.ts
 │   │   ├── submissions.ts
 │   │   ├── marking-results.ts
 │   │   └── marking-schemes.ts
