@@ -6,7 +6,7 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: _id } = await params;
+  const { id } = await params;
   const supabase = await createServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -27,5 +27,5 @@ export async function POST(
     }, { status: 402 });
   }
 
-  return NextResponse.json({ message: 'Not implemented' }, { status: 501 });
+  return NextResponse.json({ message: 'Not implemented', batchId: id }, { status: 501 });
 }

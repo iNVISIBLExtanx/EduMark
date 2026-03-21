@@ -1,5 +1,6 @@
 import { createServerClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { PastDueBanner } from '@/components/billing/PastDueBanner';
 
 export default async function DashboardLayout({
   children,
@@ -13,5 +14,10 @@ export default async function DashboardLayout({
     redirect('/login');
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <PastDueBanner />
+      {children}
+    </>
+  );
 }

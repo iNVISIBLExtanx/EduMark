@@ -1,5 +1,5 @@
 // TODO: Implement OpenAI embeddings + pgvector RAG
 // See .claude/rules/ai-integration.md for full implementation
-export async function retrieveMarkingCriteria(_schemeId: string, _questionText: string) {
-  throw new Error('Not implemented');
+export async function retrieveMarkingCriteria(schemeId: string, questionText: string) {
+  throw new Error(`Not implemented: retrieveMarkingCriteria(${schemeId}, ${questionText})`);
 }
