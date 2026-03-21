@@ -29,6 +29,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── (dashboard)/
 │   │   ├── dashboard/page.tsx
 │   │   ├── pricing/page.tsx
+│   │   ├── papers/
+│   │   │   ├── page.tsx              # question papers dashboard
+│   │   │   └── QuestionPapersView.tsx
 │   │   ├── batches/page.tsx
 │   │   ├── batches/[id]/page.tsx
 │   │   └── settings/page.tsx
@@ -37,16 +40,21 @@ Claude Code must follow this structure and create new files in the correct place
 │       │   └── callback/route.ts
 │       ├── tutor/
 │       │   ├── profile/route.ts      # GET/POST tutor profile + registration
+│       │   ├── subjects/route.ts     # GET tutor's registered subjects
 │       │   └── subscription/route.ts
 │       ├── batches/
 │       │   ├── route.ts          # create/list batches
 │       │   └── [id]/
 │       │       ├── route.ts      # get/update single batch
 │       │       └── dispatch/route.ts  # trigger AI marking
+│       ├── question-papers/
+│       │   └── route.ts          # GET/POST question papers
+│       ├── marking-schemes/
+│       │   └── route.ts          # POST marking schemes
 │       ├── subjects/
 │       │   └── route.ts          # list all subjects
 │       ├── submissions/
-│       │   └── upload/route.ts   # PDF upload endpoint
+│       │   └── upload/route.ts   # bulk PDF upload endpoint
 │       ├── reports/
 │       │   └── [id]/download/route.ts # PDF report download
 │       └── stripe/
@@ -66,6 +74,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── marking/
 │   │   ├── MarkingSummary.tsx
 │   │   └── QuestionFeedbackCard.tsx
+│   ├── papers/
+│   │   ├── QuestionPaperUploadForm.tsx
+│   │   └── QuestionPaperList.tsx
 │   ├── billing/
 │   │   ├── AiMinutesBar.tsx
 │   │   ├── PastDueBanner.tsx
@@ -79,6 +90,8 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── useTutorProfile.ts
 │   ├── useBatches.ts
 │   ├── useBatchDetail.ts
+│   ├── useQuestionPapers.ts
+│   ├── useTutorSubjects.ts
 │   ├── useSubmissions.ts
 │   ├── useMarkingResults.ts
 │   ├── useBatchPolling.ts
@@ -90,7 +103,8 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── server.ts             # server-side client (App Router)
 │   │   └── service.ts            # service-role client (webhooks only)
 │   ├── db/
-│   │   ├── tutors.ts
+│   │   ├── tutors.ts             # tutor profile + getTutorSubjects
+│   │   ├── question-papers.ts    # question paper CRUD
 │   │   ├── batches.ts
 │   │   ├── billing.ts
 │   │   ├── submissions.ts

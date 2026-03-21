@@ -87,10 +87,18 @@ export function useBatchPolling(batchId: string, enabled: boolean) {
 ```
 Set `enabled = batch.status === 'processing'` — stops polling when done.
 
+## Upload Helper (lib/api-client.ts)
+For multipart form uploads (question papers, marking schemes), use `apiUpload` — same auth pattern as `apiFetch` but omits `Content-Type` header so the browser sets the multipart boundary:
+```typescript
+export async function apiUpload<T>(url: string, formData: FormData): Promise<T> { ... }
+```
+
 ## Hooks List
 | Hook | Key | Purpose |
 |---|---|---|
 | `useTutorProfile` | `/api/tutor/profile` | tutor info + marking_language |
+| `useQuestionPapers` | `/api/question-papers` | tutor's question papers |
+| `useTutorSubjects` | `/api/tutor/subjects` | tutor's registered subjects |
 | `useBatches` | `/api/batches` | all batches for tutor |
 | `useBatchDetail` | `/api/batches/[id]` | single batch with submissions |
 | `useSubmissions` | `/api/batches/[id]/submissions` | submissions in a batch |

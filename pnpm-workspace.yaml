@@ -1,0 +1,6 @@
+allowBuilds:
+  a: true
+  c: true
+  n: true
+  s: true
+  v: true

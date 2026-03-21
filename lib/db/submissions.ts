@@ -10,3 +10,45 @@ export async function getSubmissionsByBatch(batchId: string) {
   if (error) throw error;
   return data;
 }
+
+export async function createStudentAndSubmission(input: {
+  batchId: string;
+  studentName: string;
+  indexNo?: string;
+  pdfUrl: string;
+  pageCount: number;
+}) {
+  const supabase = await createServerClient();
+
+  // Create student record
+  const { data: student, error: studentErr } = await supabase
+    .from('students')
+    .insert({ batch_id: input.batchId, name: input.studentName, index_no: input.indexNo ?? null })
+    .select('id')
+    .single();
+  if (studentErr) throw studentErr;
+
+  // Create submission record
+  const { data: submission, error: subErr } = await supabase
+    .from('submissions')
+    .insert({
+      student_id: student.id,
+      batch_id: input.batchId,
+      pdf_url: input.pdfUrl,
+      page_count: input.pageCount,
+    })
+    .select('id, student_id, pdf_url, page_count, status, created_at')
+    .single();
+  if (subErr) throw subErr;
+
+  return submission;
+}
+
+export async function updateBatchPaperCount(batchId: string, totalPapers: number) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .update({ total_papers: totalPapers })
+    .eq('id', batchId);
+  if (error) throw error;
+}

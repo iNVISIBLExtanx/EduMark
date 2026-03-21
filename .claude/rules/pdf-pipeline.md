@@ -21,20 +21,19 @@ Convert PDF pages to PNG images for Claude vision input:
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
 import { createCanvas } from 'canvas';
 
-export async function pdfToImages(pdfBuffer: Buffer): Promise<string[]> {
-  const pdf = await pdfjsLib.getDocument({ data: pdfBuffer }).promise;
-  const images: string[] = [];
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 }); // 2x = ~150-200 DPI
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx as any, viewport }).promise;
-    images.push(canvas.toDataURL('image/png').split(',')[1]); // base64 only
-  }
-  return images;
+interface PdfToImagesResult {
+  images: string[];    // base64 PNG strings (no data: prefix)
+  pageCount: number;
+  warning?: string;    // set when >20 pages
 }
+
+export async function pdfToImages(
+  pdfBuffer: Buffer,
+  options?: { scale?: number }
+): Promise<PdfToImagesResult> { ... }
+
+// Lightweight page count only — no rendering
+export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> { ... }
 ```
 
 ## DPI & Quality Notes

@@ -53,3 +53,13 @@ export async function getAllSubjects() {
   if (error) throw error;
   return data;
 }
+
+export async function getTutorSubjects(tutorId: string) {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('tutor_subjects')
+    .select('subject_id, subjects(id, name, code)')
+    .eq('tutor_id', tutorId);
+  if (error) throw error;
+  return data;
+}

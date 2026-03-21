@@ -174,20 +174,30 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (126 tests, 14 files)
+## Current Test Coverage (216 tests, 24 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
 | `lib/stripe/plans.test.ts` | 8 | Plan constants, prices, ordering |
 | `lib/billing/gate.test.ts` | 12 | isActive, hasMinutes, getBillingStatus |
 | `lib/db/billing.test.ts` | 8 | checkAndDeductMinutes, RPC error, all statuses |
+| `lib/db/question-papers.test.ts` | 8 | Question paper CRUD, tutor scoping |
+| `lib/db/marking-schemes.test.ts` | 8 | Create, fetch, update structure |
+| `lib/db/submissions.test.ts` | 8 | createStudentAndSubmission, updateBatchPaperCount |
+| `lib/db/batches.test.ts` | 8 | createBatch, updateBatchStatus, getBatchById |
+| `lib/pdf/pdf-to-images.test.ts` | 17 | PDF conversion, page count, warnings, scale |
 | `app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
 | `app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
 | `app/api/tutor/subscription/route.test.ts` | 6 | Auth, query shape, response |
+| `app/api/question-papers/route.test.ts` | 10 | Auth, file validation, subject check, upload |
+| `app/api/marking-schemes/route.test.ts` | 6 | Auth, file validation, paper ownership |
+| `app/api/batches/route.test.ts` | 8 | Auth, validation, paper/scheme ownership |
+| `app/api/submissions/upload/route.test.ts` | 10 | Auth, metadata, batch status, bulk upload |
 | `hooks/useSubscription.test.ts` | 10 | All derived values, edge cases |
 | `components/billing/AiMinutesBar.test.tsx` | 6 | All visual states |
 | `components/billing/PricingTable.test.tsx` | 9 | Plans display, checkout, top-up |
 | `components/billing/PastDueBanner.test.tsx` | 6 | Loading, visibility, portal redirect |
 | `components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
 | `components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |
+| `components/papers/QuestionPaperUploadForm.test.tsx` | 7 | Form render, validation, upload flow |
