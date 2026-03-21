@@ -24,7 +24,8 @@ Claude Code must follow this structure and create new files in the correct place
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/page.tsx
-│   │   └── callback/page.tsx
+│   │   ├── callback/page.tsx
+│   │   └── onboarding/page.tsx
 │   ├── (dashboard)/
 │   │   ├── dashboard/page.tsx
 │   │   ├── pricing/page.tsx
@@ -35,12 +36,15 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── auth/
 │       │   └── callback/route.ts
 │       ├── tutor/
+│       │   ├── profile/route.ts      # GET/POST tutor profile + registration
 │       │   └── subscription/route.ts
 │       ├── batches/
 │       │   ├── route.ts          # create/list batches
 │       │   └── [id]/
 │       │       ├── route.ts      # get/update single batch
 │       │       └── dispatch/route.ts  # trigger AI marking
+│       ├── subjects/
+│       │   └── route.ts          # list all subjects
 │       ├── submissions/
 │       │   └── upload/route.ts   # PDF upload endpoint
 │       ├── reports/

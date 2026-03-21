@@ -6,7 +6,7 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const { id: batchId } = await params;
   const supabase = await createServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -17,7 +17,8 @@ export async function POST(
     return NextResponse.json({ error: 'subscription_inactive' }, { status: 402 });
   }
 
-  // TODO: Get papers count, check minutes, dispatch batch
+  // TODO: Get papers count from batchId, check minutes, dispatch batch
+  void batchId;
   const papersCount = 0;
   if (!hasMinutes(billing, papersCount)) {
     return NextResponse.json({
@@ -27,5 +28,5 @@ export async function POST(
     }, { status: 402 });
   }
 
-  return NextResponse.json({ message: 'Not implemented', batchId: id }, { status: 501 });
+  return NextResponse.json({ message: 'Not implemented' }, { status: 501 });
 }
