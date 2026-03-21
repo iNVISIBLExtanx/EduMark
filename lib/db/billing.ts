@@ -14,8 +14,10 @@ export async function checkAndDeductMinutes(tutorId: string, papersCount: number
   const available = tutor.ai_minutes_limit - tutor.ai_minutes_used;
   if (available < papersCount) throw new Error('insufficient_ai_minutes');
 
-  await supabase.rpc('increment_ai_minutes_used', {
+  const { error: rpcError } = await supabase.rpc('increment_ai_minutes_used', {
     p_tutor_id: tutorId,
     p_amount: papersCount,
   });
+
+  if (rpcError) throw new Error('rpc_error');
 }

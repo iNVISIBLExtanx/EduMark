@@ -74,4 +74,47 @@ describe('checkAndDeductMinutes', () => {
 
     await expect(checkAndDeductMinutes('tutor-1', 1)).rejects.toThrow('insufficient_ai_minutes');
   });
+
+  it('allows deduction when subscription is canceled (not blocked like past_due)', async () => {
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { ai_minutes_used: 5, ai_minutes_limit: 50, subscription_status: 'canceled' },
+      error: null,
+    });
+    mockSupabaseClient.rpc.mockResolvedValue({ error: null });
+
+    // canceled is not blocked at this level — only past_due is
+    // upstream isActive() gate should block canceled subscriptions before reaching here
+    await checkAndDeductMinutes('tutor-1', 3);
+
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith('increment_ai_minutes_used', {
+      p_tutor_id: 'tutor-1',
+      p_amount: 3,
+    });
+  });
+
+  it('throws rpc_error when RPC call fails', async () => {
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { ai_minutes_used: 5, ai_minutes_limit: 50, subscription_status: 'active' },
+      error: null,
+    });
+    mockSupabaseClient.rpc.mockResolvedValue({ error: { message: 'RPC failed' } });
+
+    // BUG: the source code does NOT check the RPC error.
+    // This test documents the bug — rpc error is silently ignored.
+    // The function should throw on RPC failure to prevent undeducted dispatches.
+    await expect(checkAndDeductMinutes('tutor-1', 3)).rejects.toThrow('rpc_error');
+  });
+
+  it('queries the tutors table with correct tutorId', async () => {
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { ai_minutes_used: 0, ai_minutes_limit: 50, subscription_status: 'active' },
+      error: null,
+    });
+    mockSupabaseClient.rpc.mockResolvedValue({ error: null });
+
+    await checkAndDeductMinutes('tutor-42', 1);
+
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('tutors');
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'tutor-42');
+  });
 });

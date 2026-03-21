@@ -48,4 +48,62 @@ describe('POST /api/stripe/portal', () => {
     const body = await res.json();
     expect(body.url).toBe('https://billing.stripe.com/portal/session123');
   });
+
+  it('passes correct return_url to Stripe portal session', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1' } },
+    });
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { stripe_customer_id: 'cus_123' },
+      error: null,
+    });
+    mockStripe.billingPortal.sessions.create.mockResolvedValue({
+      url: 'https://billing.stripe.com/portal/session123',
+    });
+
+    await POST();
+
+    expect(mockStripe.billingPortal.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        return_url: 'https://edumark.lk/settings',
+      }),
+    );
+  });
+
+  it('passes correct customer ID to Stripe portal session', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1' } },
+    });
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { stripe_customer_id: 'cus_portal' },
+      error: null,
+    });
+    mockStripe.billingPortal.sessions.create.mockResolvedValue({
+      url: 'https://billing.stripe.com/portal/session123',
+    });
+
+    await POST();
+
+    expect(mockStripe.billingPortal.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: 'cus_portal',
+      }),
+    );
+  });
+
+  it('throws when Stripe API returns error', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1' } },
+    });
+    mockSupabaseClient.single.mockResolvedValue({
+      data: { stripe_customer_id: 'cus_123' },
+      error: null,
+    });
+    mockStripe.billingPortal.sessions.create.mockRejectedValue(
+      new Error('Stripe API error'),
+    );
+
+    // No try/catch in source — unhandled error surfaces as 500
+    await expect(POST()).rejects.toThrow('Stripe API error');
+  });
 });

@@ -69,7 +69,8 @@ export async function POST(req: Request) {
 
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice;
-        const subscriptionId = (invoice as unknown as { subscription: string }).subscription;
+        const subscriptionId = (invoice as unknown as { subscription: string | null }).subscription;
+        if (!subscriptionId) break;
         const sub = await stripe.subscriptions.retrieve(subscriptionId);
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
@@ -84,7 +85,8 @@ export async function POST(req: Request) {
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice;
-        const subscriptionId = (invoice as unknown as { subscription: string }).subscription;
+        const subscriptionId = (invoice as unknown as { subscription: string | null }).subscription;
+        if (!subscriptionId) break;
         await supabase.from('tutors').update({
           subscription_status: 'past_due',
         }).eq('stripe_subscription_id', subscriptionId);

@@ -211,7 +211,12 @@ export async function POST(req: Request) {
       case 'invoice.payment_succeeded': {
         // Monthly renewal: reset usage counter for new billing period
         const invoice = event.data.object;
-        const sub = await stripe.subscriptions.retrieve(invoice.subscription as string);
+        // IMPORTANT: invoice.subscription can be null for one-off invoices.
+        // Calling stripe.subscriptions.retrieve(undefined) crashes with
+        // "subscription_exposed_id must be a string". Guard against this.
+        const subscriptionId = (invoice as unknown as { subscription: string | null }).subscription;
+        if (!subscriptionId) break;
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
         const userId = sub.metadata?.supabase_user_id;
         if (!userId) break;
 
@@ -225,9 +230,12 @@ export async function POST(req: Request) {
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
+        // Same null guard as above — one-off invoices have no subscription.
+        const subscriptionId = (invoice as unknown as { subscription: string | null }).subscription;
+        if (!subscriptionId) break;
         await supabase.from('tutors').update({
           subscription_status: 'past_due',
-        }).eq('stripe_subscription_id', invoice.subscription as string);
+        }).eq('stripe_subscription_id', subscriptionId);
         break;
       }
 
@@ -317,10 +325,15 @@ export async function createOrGetStripeCustomer(userId: string, email: string): 
     metadata: { supabase_user_id: userId },
   });
 
-  await supabase
+  // IMPORTANT: Check the Supabase update error. If the DB write fails but we
+  // return the customer ID, the next call creates a DUPLICATE Stripe customer
+  // (orphaned customer bug). Throwing here prevents that.
+  const { error } = await supabase
     .from('tutors')
     .update({ stripe_customer_id: customer.id })
     .eq('id', userId);
+
+  if (error) throw new Error('Failed to persist Stripe customer ID');
 
   return customer.id;
 }
@@ -339,3 +352,14 @@ export async function createOrGetStripeCustomer(userId: string, email: string): 
 - [x] AI minutes deducted atomically via `SECURITY DEFINER` SQL function (race-condition safe)
 - [x] Top-up uses `mode: 'payment'`, subscription uses `mode: 'subscription'`
 - [x] `supabase_user_id` in Stripe metadata bridges Stripe events back to Supabase user
+- [x] `invoice.subscription` null-guarded in webhook (one-off invoices have no subscription)
+- [x] `createOrGetStripeCustomer` checks Supabase update error (prevents orphaned Stripe customers)
+- [x] `checkAndDeductMinutes` checks RPC error (prevents silent minute deduction failures)
+
+## Bugs Found & Fixed During Testing
+These bugs were discovered by writing tests first, then fixing the source code (not the tests).
+
+1. **`lib/db/billing.ts`** — `supabase.rpc()` error was silently ignored. If `increment_ai_minutes_used` RPC failed, minutes weren't deducted but batch dispatch proceeded. Fixed: added `if (rpcError) throw new Error('rpc_error')`.
+2. **`hooks/useSubscription.ts`** — `ai_minutes_used / ai_minutes_limit` produced `NaN` when limit was 0 (e.g. corrupted data). Fixed: added `data.ai_minutes_limit > 0` guard, returns 0 instead of NaN.
+3. **`lib/stripe/subscription.ts`** — Supabase update error after creating Stripe customer was unchecked. If DB write failed, next call created a duplicate (orphaned) Stripe customer. Fixed: added error check and throw.
+4. **`app/api/stripe/webhook/route.ts`** — `invoice.payment_succeeded` and `invoice.payment_failed` events crashed when `invoice.subscription` was null (one-off invoices). `stripe.subscriptions.retrieve(undefined)` threw. Fixed: added `if (!subscriptionId) break;` null guards.

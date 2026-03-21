@@ -16,10 +16,12 @@ export async function createOrGetStripeCustomer(userId: string, email: string): 
     metadata: { supabase_user_id: userId },
   });
 
-  await supabase
+  const { error } = await supabase
     .from('tutors')
     .update({ stripe_customer_id: customer.id })
     .eq('id', userId);
+
+  if (error) throw new Error('Failed to persist Stripe customer ID');
 
   return customer.id;
 }

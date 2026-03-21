@@ -26,4 +26,31 @@ describe('plans constants', () => {
     expect(TOPUP_MINUTES).toBe(10);
     expect(TOPUP_PRICE_LKR).toBe(990);
   });
+
+  it('has correct numeric AI minute values per plan', () => {
+    expect(PLAN_AI_MINUTES.starter).toBe(50);
+    expect(PLAN_AI_MINUTES.standard).toBe(150);
+    expect(PLAN_AI_MINUTES.pro).toBe(350);
+    expect(PLAN_AI_MINUTES.institute).toBe(750);
+  });
+
+  it('has correct LKR prices per plan', () => {
+    expect(PLAN_PRICES_LKR.starter).toBe(2490);
+    expect(PLAN_PRICES_LKR.standard).toBe(5490);
+    expect(PLAN_PRICES_LKR.pro).toBe(10990);
+    expect(PLAN_PRICES_LKR.institute).toBe(21990);
+  });
+
+  it('plans have increasing prices', () => {
+    expect(PLAN_PRICES_LKR.starter).toBeGreaterThan(PLAN_PRICES_LKR.free);
+    expect(PLAN_PRICES_LKR.standard).toBeGreaterThan(PLAN_PRICES_LKR.starter);
+    expect(PLAN_PRICES_LKR.pro).toBeGreaterThan(PLAN_PRICES_LKR.standard);
+    expect(PLAN_PRICES_LKR.institute).toBeGreaterThan(PLAN_PRICES_LKR.pro);
+  });
+
+  it('has exactly 5 plan keys', () => {
+    const expectedPlans = ['free', 'starter', 'standard', 'pro', 'institute'];
+    expect(Object.keys(PLAN_AI_MINUTES).sort()).toEqual(expectedPlans.sort());
+    expect(Object.keys(PLAN_PRICES_LKR).sort()).toEqual(expectedPlans.sort());
+  });
 });
