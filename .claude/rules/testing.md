@@ -147,6 +147,22 @@ export default defineConfig({
 import '@testing-library/jest-dom/vitest';
 ```
 
+## Mock Chain Reset Pattern
+When using `vi.clearAllMocks()` in `beforeEach`, it resets `mockReturnThis()` implementations.
+You MUST re-establish the mock chain after clearing:
+```typescript
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Re-establish mock chain after clearAllMocks resets implementations
+  mockSupabaseClient.from.mockReturnThis();
+  mockSupabaseClient.select.mockReturnThis();
+  mockSupabaseClient.eq.mockReturnThis();
+  mockSupabaseClient.update.mockReturnThis();
+});
+```
+
+When a mock method is called multiple times in a single flow (e.g. `.eq()` used for both SELECT and UPDATE chains), use `mockReturnValueOnce` / `mockResolvedValueOnce` to handle each call separately.
+
 ## Rules
 - Every new feature MUST include tests before it is considered complete
 - Tests must cover: happy path, error/edge cases, and auth checks (for API routes)
@@ -155,3 +171,23 @@ import '@testing-library/jest-dom/vitest';
 - Never test implementation details — test behavior and outputs
 - Use `describe` blocks to group related tests, `it` for individual cases
 - Keep tests focused: one assertion concept per `it` block
+- **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
+- Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
+
+## Current Test Coverage (126 tests, 14 files)
+| File | Tests | Coverage area |
+|------|-------|---------------|
+| `lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
+| `lib/stripe/plans.test.ts` | 8 | Plan constants, prices, ordering |
+| `lib/billing/gate.test.ts` | 12 | isActive, hasMinutes, getBillingStatus |
+| `lib/db/billing.test.ts` | 8 | checkAndDeductMinutes, RPC error, all statuses |
+| `app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
+| `app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
+| `app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
+| `app/api/tutor/subscription/route.test.ts` | 6 | Auth, query shape, response |
+| `hooks/useSubscription.test.ts` | 10 | All derived values, edge cases |
+| `components/billing/AiMinutesBar.test.tsx` | 6 | All visual states |
+| `components/billing/PricingTable.test.tsx` | 9 | Plans display, checkout, top-up |
+| `components/billing/PastDueBanner.test.tsx` | 6 | Loading, visibility, portal redirect |
+| `components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
+| `components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |

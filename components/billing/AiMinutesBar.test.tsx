@@ -116,4 +116,12 @@ describe('AiMinutesBar', () => {
     expect(screen.queryByText(/Running low/)).toBeNull();
     expect(screen.queryByText('Update Payment')).toBeNull();
   });
+
+  it('returns null when subscription data is null', () => {
+    const original = mockSubscription.subscription;
+    (mockSubscription as Record<string, unknown>).subscription = null;
+    const { container } = render(<AiMinutesBar />);
+    expect(container.firstChild).toBeNull();
+    (mockSubscription as Record<string, unknown>).subscription = original;
+  });
 });

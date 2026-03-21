@@ -84,4 +84,107 @@ describe('POST /api/stripe/checkout', () => {
       }),
     );
   });
+
+  it('sets currency to lkr in checkout session', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_starter', isTopUp: false }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({ currency: 'lkr' }),
+    );
+  });
+
+  it('sets correct success_url and cancel_url', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_starter', isTopUp: false }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: 'https://edumark.lk/dashboard?upgraded=1',
+        cancel_url: 'https://edumark.lk/pricing',
+      }),
+    );
+  });
+
+  it('includes supabase_user_id in session metadata', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_starter', isTopUp: false }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { supabase_user_id: 'user-1' },
+      }),
+    );
+  });
+
+  it('includes subscription_data.metadata for subscription mode', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_starter', isTopUp: false }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_data: { metadata: { supabase_user_id: 'user-1' } },
+      }),
+    );
+  });
+
+  it('does not include subscription_data for top-up mode', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_topup', isTopUp: true }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_data: undefined,
+      }),
+    );
+  });
+
+  it('throws when Stripe checkout session creation fails', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockRejectedValue(
+      new Error('Stripe checkout error'),
+    );
+
+    // No try/catch in source — unhandled error propagates
+    await expect(
+      POST(makeRequest({ priceId: 'price_starter', isTopUp: false })),
+    ).rejects.toThrow('Stripe checkout error');
+  });
+
+  it('sets correct line_items with priceId and quantity 1', async () => {
+    mockSupabaseClient.auth.getUser.mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'test@test.com' } },
+    });
+    mockStripe.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/s' });
+
+    await POST(makeRequest({ priceId: 'price_pro', isTopUp: false }));
+
+    expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        line_items: [{ price: 'price_pro', quantity: 1 }],
+      }),
+    );
+  });
 });
