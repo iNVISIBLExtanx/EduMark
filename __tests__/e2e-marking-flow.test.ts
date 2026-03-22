@@ -1,6 +1,6 @@
 /**
  * End-to-end integration test covering the full tutor workflow
- * from paper upload through to marking results (Phase 1–8).
+ * from paper upload through to marking results (Phase 1–9).
  *
  * This test calls the actual route handlers with mocked Supabase/OpenAI/Claude
  * to verify the entire chain works together — not just individual units.
@@ -18,6 +18,8 @@
  *  10. POST /api/batches/[id]/dispatch     — dispatch batch to Claude Batch API
  *  11. GET /api/batches/[id]/poll           — poll results (processing)
  *  12. GET /api/batches/[id]/poll           — poll results (completed, store marks)
+ *  13. GET /api/batches/[id]/results       — retrieve all marking results for batch
+ *  14. PATCH /api/submissions/[id]/override — tutor overrides marks and feedback
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -30,6 +32,7 @@ const SCHEME_ID = '00000000-0000-4000-8000-000000000030';
 const BATCH_ID = '00000000-0000-4000-8000-000000000040';
 const STUDENT_ID = '00000000-0000-4000-8000-000000000050';
 const SUBMISSION_ID = '00000000-0000-4000-8000-000000000060';
+const RESULT_ID = '00000000-0000-4000-8000-000000000070';
 
 // --- Mock Supabase with stateful behavior ---
 const mockGetUser = vi.fn();
@@ -174,9 +177,13 @@ vi.mock('@/lib/db/billing', () => ({
 
 // --- Mock DB layer: marking-results ---
 const mockSaveMarkingResults = vi.fn();
+const mockGetMarkingResultsByBatch = vi.fn();
+const mockUpdateMarkingOverride = vi.fn();
 
 vi.mock('@/lib/db/marking-results', () => ({
   saveMarkingResults: (...args: unknown[]) => mockSaveMarkingResults(...args),
+  getMarkingResultsByBatch: (...args: unknown[]) => mockGetMarkingResultsByBatch(...args),
+  updateMarkingOverride: (...args: unknown[]) => mockUpdateMarkingOverride(...args),
 }));
 
 // --- Import route handlers and lib functions AFTER mocks ---
@@ -188,6 +195,8 @@ import { POST as postSubmissions } from '@/app/api/submissions/upload/route';
 import { GET as getSubmissions } from '@/app/api/batches/[id]/submissions/route';
 import { POST as postDispatch } from '@/app/api/batches/[id]/dispatch/route';
 import { GET as getPoll } from '@/app/api/batches/[id]/poll/route';
+import { GET as getBatchResults } from '@/app/api/batches/[id]/results/route';
+import { PATCH as patchOverride } from '@/app/api/submissions/[id]/override/route';
 import { retrieveMarkingCriteria } from '@/lib/ai/embeddings';
 import { buildSystemPrompt } from '@/lib/ai/mark-paper';
 import { chunkMarkingScheme } from '@/lib/ai/chunking';
@@ -215,7 +224,7 @@ beforeEach(() => {
   mockStorageUpload.mockResolvedValue({ error: null });
 });
 
-describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
+describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
   // ─── Step 1: Upload question paper ───────────────────────────
   describe('Step 1: Upload question paper', () => {
     it('creates question paper with correct tutor ownership and subject', async () => {
@@ -1224,6 +1233,200 @@ describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
     });
   });
 
+  // ─── Step 13: Retrieve batch marking results ──────────────
+  describe('Step 13: Retrieve marking results for batch', () => {
+    const MOCK_RESULTS = [
+      {
+        id: RESULT_ID,
+        submission_id: SUBMISSION_ID,
+        question_no: 1,
+        max_marks: 10,
+        awarded_marks: 7,
+        student_answer_text: 'F = ma, force is proportional to mass and acceleration',
+        feedback: 'Good understanding of Newton\'s second law',
+        ocr_confidence: 'high',
+        tutor_override: false,
+        override_marks: null,
+        override_feedback: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000071',
+        submission_id: SUBMISSION_ID,
+        question_no: 2,
+        max_marks: 15,
+        awarded_marks: 12,
+        student_answer_text: 'Energy cannot be created or destroyed',
+        feedback: 'Correct explanation of conservation of energy',
+        ocr_confidence: 'high',
+        tutor_override: false,
+        override_marks: null,
+        override_feedback: null,
+      },
+    ];
+
+    it('returns marking results for an owned batch', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({ id: BATCH_ID, tutor_id: TEST_USER.id });
+      mockGetMarkingResultsByBatch.mockResolvedValue(MOCK_RESULTS);
+
+      const res = await getBatchResults(
+        new Request('http://localhost/api/batches/test/results'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toHaveLength(2);
+      expect(body[0].submission_id).toBe(SUBMISSION_ID);
+      expect(body[0].question_no).toBe(1);
+      expect(body[0].awarded_marks).toBe(7);
+      expect(body[0].tutor_override).toBe(false);
+
+      // Verify batch ownership was checked
+      expect(mockGetBatchById).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
+      expect(mockGetMarkingResultsByBatch).toHaveBeenCalledWith(BATCH_ID);
+    });
+
+    it('returns 404 when batch does not belong to tutor', async () => {
+      authedUser();
+      mockGetBatchById.mockRejectedValue(new Error('batch_not_found'));
+
+      const res = await getBatchResults(
+        new Request('http://localhost/api/batches/test/results'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(404);
+      expect(mockGetMarkingResultsByBatch).not.toHaveBeenCalled();
+    });
+
+    it('returns empty results for batch with no marked submissions', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({ id: BATCH_ID, tutor_id: TEST_USER.id });
+      mockGetMarkingResultsByBatch.mockResolvedValue([]);
+
+      const res = await getBatchResults(
+        new Request('http://localhost/api/batches/test/results'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual([]);
+    });
+  });
+
+  // ─── Step 14: Tutor overrides marks and feedback ──────────
+  describe('Step 14: Tutor overrides marks via PATCH', () => {
+    it('successfully overrides marks and feedback for a result', async () => {
+      authedUser();
+      mockUpdateMarkingOverride.mockResolvedValue(undefined);
+
+      const res = await patchOverride(
+        new Request('http://localhost/api/submissions/test/override', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: RESULT_ID,
+            override_marks: 9,
+            override_feedback: 'Excellent work — full marks for F=ma explanation, minor deduction for missing units',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.success).toBe(true);
+
+      // Verify correct args passed to DB function
+      expect(mockUpdateMarkingOverride).toHaveBeenCalledWith(
+        RESULT_ID,
+        SUBMISSION_ID,
+        9,
+        'Excellent work — full marks for F=ma explanation, minor deduction for missing units',
+      );
+    });
+
+    it('rejects override with invalid result_id (not UUID)', async () => {
+      authedUser();
+
+      const res = await patchOverride(
+        new Request('http://localhost/api/submissions/test/override', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: 'not-a-uuid',
+            override_marks: 9,
+            override_feedback: 'Feedback',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockUpdateMarkingOverride).not.toHaveBeenCalled();
+    });
+
+    it('rejects override with negative marks', async () => {
+      authedUser();
+
+      const res = await patchOverride(
+        new Request('http://localhost/api/submissions/test/override', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: RESULT_ID,
+            override_marks: -1,
+            override_feedback: 'Feedback',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects override with empty feedback', async () => {
+      authedUser();
+
+      const res = await patchOverride(
+        new Request('http://localhost/api/submissions/test/override', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: RESULT_ID,
+            override_marks: 8,
+            override_feedback: '',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 500 when DB update fails', async () => {
+      authedUser();
+      mockUpdateMarkingOverride.mockRejectedValue(new Error('DB write failed'));
+
+      const res = await patchOverride(
+        new Request('http://localhost/api/submissions/test/override', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: RESULT_ID,
+            override_marks: 8,
+            override_feedback: 'Feedback',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(500);
+    });
+  });
+
   // ─── Cross-cutting: New route auth enforcement ─────────────
   describe('Cross-cutting: New routes reject unauthenticated requests', () => {
     beforeEach(() => {
@@ -1234,6 +1437,30 @@ describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
       const res = await getPoll(
         new Request('http://localhost/test'),
         { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /api/batches/[id]/results returns 401', async () => {
+      const res = await getBatchResults(
+        new Request('http://localhost/test'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('PATCH /api/submissions/[id]/override returns 401', async () => {
+      const res = await patchOverride(
+        new Request('http://localhost/test', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            result_id: RESULT_ID,
+            override_marks: 5,
+            override_feedback: 'test',
+          }),
+        }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
       );
       expect(res.status).toBe(401);
     });

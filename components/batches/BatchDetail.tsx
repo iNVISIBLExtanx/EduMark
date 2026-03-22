@@ -1,9 +1,13 @@
 'use client';
 
+import { Fragment, useState } from 'react';
 import { useBatchDetail } from '@/hooks/useBatchDetail';
 import { useSubmissions } from '@/hooks/useSubmissions';
 import { BatchStatusBadge } from './BatchStatusBadge';
 import { LanguageBadge } from '@/components/shared/LanguageBadge';
+import { SubmissionResultsPanel } from './SubmissionResultsPanel';
+import { Button } from '@/components/ui/button';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -16,10 +20,15 @@ import {
 export function BatchDetail({ batchId }: { batchId: string }) {
   const { batch, isLoading, error } = useBatchDetail(batchId);
   const { submissions, isLoading: submissionsLoading } = useSubmissions(batchId);
+  const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
 
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;
   if (!batch) return <p className="p-6 text-gray-500">Batch not found</p>;
+
+  const toggleExpand = (submissionId: string) => {
+    setExpandedSubmissionId((prev) => (prev === submissionId ? null : submissionId));
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -52,24 +61,56 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                 <TableHead>Student Name</TableHead>
                 <TableHead>Index No</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {submissions.map((submission) => (
-                <TableRow key={submission.id}>
-                  <TableCell>{submission.students.name}</TableCell>
-                  <TableCell>{submission.students.index_no ?? '—'}</TableCell>
-                  <TableCell>
-                    <BatchStatusBadge status={submission.status} />
-                  </TableCell>
-                </TableRow>
-              ))}
+              {submissions.map((submission) => {
+                const isExpanded = expandedSubmissionId === submission.id;
+                const isMarked = submission.status === 'marked';
+                return (
+                  <Fragment key={submission.id}>
+                    <TableRow>
+                      <TableCell>{submission.students.name}</TableCell>
+                      <TableCell>{submission.students.index_no ?? '—'}</TableCell>
+                      <TableCell>
+                        <BatchStatusBadge status={submission.status} />
+                      </TableCell>
+                      <TableCell>
+                        {isMarked && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleExpand(submission.id)}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 mr-1" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 mr-1" />
+                            )}
+                            {isExpanded ? 'Hide Results' : 'View Results'}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && isMarked && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="p-0 px-4 pb-4">
+                          <SubmissionResultsPanel
+                            submissionId={submission.id}
+                            language={batch.medium}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         )}
       </div>
 
-      {/* TODO Phase 9: Show marking results using MarkingSummary + QuestionFeedbackCard */}
       {/* TODO Phase 10: Add "Download Report" links per submission */}
     </div>
   );

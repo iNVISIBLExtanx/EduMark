@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { BatchDetail } from '@/components/batches/BatchDetail';
 
 vi.mock('@/hooks/useBatchDetail', () => ({
@@ -13,6 +13,20 @@ vi.mock('@/components/batches/BatchStatusBadge', () => ({
 }));
 vi.mock('@/components/shared/LanguageBadge', () => ({
   LanguageBadge: ({ language }: { language: string }) => <span data-testid="language-badge">{language}</span>,
+}));
+vi.mock('@/components/batches/SubmissionResultsPanel', () => ({
+  SubmissionResultsPanel: ({ submissionId }: { submissionId: string }) => (
+    <div data-testid="results-panel">{submissionId}</div>
+  ),
+}));
+vi.mock('@/components/ui/button', () => ({
+  Button: ({ children, onClick, ...props }: React.PropsWithChildren<{ onClick?: () => void }>) => (
+    <button onClick={onClick} {...props}>{children}</button>
+  ),
+}));
+vi.mock('lucide-react', () => ({
+  ChevronDown: () => <span data-testid="chevron-down" />,
+  ChevronRight: () => <span data-testid="chevron-right" />,
 }));
 
 import { useBatchDetail } from '@/hooks/useBatchDetail';
@@ -128,5 +142,59 @@ describe('BatchDetail', () => {
     expect(screen.getByText('—')).toBeInTheDocument();
     // Submission count in heading
     expect(screen.getByText('Submissions (2)')).toBeInTheDocument();
+  });
+
+  it('shows View Results button for marked submissions', () => {
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[1], status: 'marked' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByText('View Results')).toBeInTheDocument();
+  });
+
+  it('does not show View Results for pending submissions', () => {
+    render(<BatchDetail batchId="b1" />);
+    // First submission is pending, should not have View Results
+    const buttons = screen.queryAllByText('View Results');
+    // Only the marked submission (s2) should have the button
+    expect(buttons).toHaveLength(1);
+  });
+
+  it('shows Actions column header', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByText('Actions')).toBeInTheDocument();
+  });
+
+  it('renders SubmissionResultsPanel when View Results is clicked', async () => {
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[1], status: 'marked' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('View Results'));
+    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
+    expect(screen.getByText('Hide Results')).toBeInTheDocument();
+  });
+
+  it('toggles results panel: clicking View Results then Hide Results hides the panel', () => {
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[1], status: 'marked' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    // First click: open
+    fireEvent.click(screen.getByText('View Results'));
+    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
+    // Second click: close
+    fireEvent.click(screen.getByText('Hide Results'));
+    expect(screen.queryByTestId('results-panel')).not.toBeInTheDocument();
+    expect(screen.getByText('View Results')).toBeInTheDocument();
   });
 });

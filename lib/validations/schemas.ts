@@ -8,6 +8,7 @@ export const createBatchSchema = z.object({
 });
 
 export const overrideMarksSchema = z.object({
+  result_id: z.string().uuid(),
   override_marks: z.number().int().min(0),
   override_feedback: z.string().min(1),
 });
