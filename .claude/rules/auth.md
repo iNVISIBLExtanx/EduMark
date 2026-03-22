@@ -27,16 +27,43 @@ export function createServerClient() {
 }
 ```
 
-### Browser (SWR hooks, client components)
+### Browser (SWR hooks, client components) — SINGLETON
 ```typescript
 // lib/supabase/client.ts
 import { createBrowserClient as _create } from '@supabase/ssr';
-export const createBrowserClient = () =>
-  _create(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+
+let client: ReturnType<typeof _create> | null = null;
+
+export const createBrowserClient = () => {
+  if (!client) {
+    client = _create(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return client;
+};
 ```
+
+**Why singleton**: The browser client is used by the SWR fetcher, `apiFetch`, and `apiUpload`. Without a singleton, each call creates a new instance and `getSession()` re-parses cookies independently. With a singleton, `getSession()` returns the in-memory cached session instantly. This is critical for tab switch performance — a page with 4 SWR hooks would otherwise make 4 independent session lookups.
 
 ## Auth Guard
 Protected routes are under `app/(dashboard)/`. The layout checks session server-side and redirects to `/login` if unauthenticated.
+
+### Layout Auth with `React.cache()`
+The dashboard layout wraps the auth + tutor lookup in `React.cache()` to deduplicate within a single render pass:
+```typescript
+import { cache } from 'react';
+
+const getAuthenticatedTutor = cache(async () => {
+  const supabase = await createServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const tutor = await getTutorByIdOrNull(user.id);
+  return { user, tutor };
+});
+```
+This prevents redundant `getUser()` + DB calls when multiple server components in the same request need the authenticated tutor.
 
 ## API Route Auth Pattern
 Every API route must verify the JWT:
