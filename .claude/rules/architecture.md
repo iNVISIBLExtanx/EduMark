@@ -13,7 +13,8 @@ Claude Code must follow this structure and create new files in the correct place
 - **.claude/rules/** — Instruction files for Claude Code (this folder)
 
 ## Testing
-- Tests live **next to** the file they test: `foo.ts` → `foo.test.ts`
+- Tests live in `__tests__/` at the project root, mirroring the source tree: `lib/billing/gate.ts` → `__tests__/lib/billing/gate.test.ts`
+- Cross-cutting/E2E tests go directly in `__tests__/` root: `__tests__/e2e-marking-flow.test.ts`
 - Shared mocks in `__mocks__/` (supabase, stripe, anthropic)
 - See `.claude/rules/testing.md` for full testing strategy
 
@@ -158,6 +159,23 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── billing.md
 │       ├── stripe-integration.md
 │       └── feature-gating.md
+│
+├── __tests__/                 # All test files, mirrors source tree structure
+│   ├── lib/
+│   │   ├── stripe/
+│   │   ├── billing/
+│   │   ├── db/
+│   │   ├── ai/
+│   │   └── pdf/
+│   ├── app/api/
+│   ├── hooks/
+│   ├── components/
+│   └── e2e-marking-flow.test.ts  # cross-cutting E2E tests
+│
+├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic)
+│   ├── supabase.ts
+│   ├── stripe.ts
+│   └── anthropic.ts
 │
 ├── CLAUDE.md
 └── package.json
