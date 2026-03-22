@@ -2,12 +2,16 @@
 
 ## Full Workflow (step by step)
 
+### Step 0: Upload Question Paper + Marking Scheme (together)
+The marking scheme is **required** when uploading a question paper — Claude cannot mark without it.
+`POST /api/question-papers` uploads the paper PDF, then `POST /api/marking-schemes` uploads the scheme PDF linked to the paper.
+Both are uploaded in a single form submission in `QuestionPaperUploadForm.tsx`.
+
 ### Step 1: Create Batch
 `POST /api/batches` → creates batch record with status `pending`, links to paper + scheme
 
-### Step 2: Upload Marking Scheme
-`POST /api/marking-schemes` → uploads PDF to Storage, Claude parses structure (questions, marks, criteria) → saved to `marking_schemes.structure_json`
-Then `POST /api/marking-schemes/[id]/embeddings` → chunks scheme + generates OpenAI embeddings → stored in `ms_embeddings`
+### Step 2: Process Marking Scheme (embeddings)
+`POST /api/marking-schemes/[id]/embeddings` → chunks scheme + generates OpenAI embeddings → stored in `ms_embeddings`
 
 ### Step 3: Bulk Upload Student Papers
 `POST /api/submissions` (multipart) → for each PDF:

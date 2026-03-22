@@ -49,6 +49,14 @@ function attachPdfFile() {
   return file;
 }
 
+function attachSchemeFile() {
+  const file = new File(['scheme content'], 'scheme.pdf', { type: 'application/pdf' });
+  const input = screen.getByLabelText(/Marking Scheme PDF/);
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  fireEvent.change(input);
+  return file;
+}
+
 describe('QuestionPaperUploadForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -94,6 +102,19 @@ describe('QuestionPaperUploadForm', () => {
     });
   });
 
+  it('shows error when no marking scheme is selected', async () => {
+    const user = userEvent.setup();
+    render(<QuestionPaperUploadForm />);
+
+    await fillRequiredFields(user);
+    attachPdfFile();
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Please select a marking scheme PDF/)).toBeDefined();
+    });
+  });
+
   it('calls apiUpload on successful submit', async () => {
     const user = userEvent.setup();
     mockApiUpload.mockResolvedValue({ id: 'paper-1' });
@@ -101,6 +122,7 @@ describe('QuestionPaperUploadForm', () => {
 
     await fillRequiredFields(user);
     attachPdfFile();
+    attachSchemeFile();
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
     await waitFor(() => {
@@ -118,6 +140,7 @@ describe('QuestionPaperUploadForm', () => {
 
     await fillRequiredFields(user);
     attachPdfFile();
+    attachSchemeFile();
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
     await waitFor(() => {
@@ -133,6 +156,7 @@ describe('QuestionPaperUploadForm', () => {
 
     await fillRequiredFields(user);
     attachPdfFile();
+    attachSchemeFile();
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
     await waitFor(() => {

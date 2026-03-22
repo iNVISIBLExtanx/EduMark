@@ -8,15 +8,22 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { priceId, isTopUp } = await req.json();
+  const { priceId: priceIdOrPlanKey, isTopUp } = await req.json();
 
-  const validPrices = [
-    process.env.STRIPE_PRICE_STARTER,
-    process.env.STRIPE_PRICE_STANDARD,
-    process.env.STRIPE_PRICE_PRO,
-    process.env.STRIPE_PRICE_INSTITUTE,
-    process.env.STRIPE_PRICE_TOPUP,
-  ].filter(Boolean);
+  // Map plan key names to Stripe price IDs (client sends plan keys since
+  // STRIPE_PRICE_* env vars are server-only and must never reach the browser)
+  const PLAN_KEY_TO_PRICE_ID: Record<string, string | undefined> = {
+    starter: process.env.STRIPE_PRICE_STARTER,
+    standard: process.env.STRIPE_PRICE_STANDARD,
+    pro: process.env.STRIPE_PRICE_PRO,
+    institute: process.env.STRIPE_PRICE_INSTITUTE,
+    topup: process.env.STRIPE_PRICE_TOPUP,
+  };
+
+  // Accept either a plan key name ("starter") or a raw Stripe price ID ("price_xxx")
+  const priceId = PLAN_KEY_TO_PRICE_ID[priceIdOrPlanKey] ?? priceIdOrPlanKey;
+
+  const validPrices = Object.values(PLAN_KEY_TO_PRICE_ID).filter(Boolean);
 
   if (!validPrices.includes(priceId)) {
     return NextResponse.json({ error: 'Invalid price' }, { status: 400 });

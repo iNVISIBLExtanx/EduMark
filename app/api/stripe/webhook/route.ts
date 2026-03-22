@@ -57,7 +57,7 @@ export async function POST(req: Request) {
             ai_minutes_limit: PLAN_AI_MINUTES[plan],
             ai_minutes_used: 0,
             subscription_status: 'active',
-            billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+            billing_period_end: new Date(sub.items.data[0].current_period_end * 1000).toISOString(),
           }).eq('id', userId);
         }
 
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
         await supabase.from('tutors').update({
           ai_minutes_used: 0,
           subscription_status: 'active',
-          billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+          billing_period_end: new Date(sub.items.data[0].current_period_end * 1000).toISOString(),
         }).eq('stripe_subscription_id', sub.id);
         break;
       }
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
           plan,
           ai_minutes_limit: PLAN_AI_MINUTES[plan],
           subscription_status: sub.status,
-          billing_period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+          billing_period_end: new Date(sub.items.data[0].current_period_end * 1000).toISOString(),
         }).eq('stripe_subscription_id', sub.id);
         break;
       }

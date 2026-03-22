@@ -80,8 +80,13 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── billing/
 │   │   ├── AiMinutesBar.tsx
 │   │   ├── PastDueBanner.tsx
+│   │   ├── PlanBadge.tsx
 │   │   ├── PricingTable.tsx
 │   │   └── UpgradeModal.tsx
+│   ├── dashboard/
+│   │   └── DashboardHome.tsx
+│   ├── settings/
+│   │   └── SettingsView.tsx
 │   └── shared/
 │       ├── LanguageBadge.tsx
 │       └── SubjectBadge.tsx
@@ -95,7 +100,8 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── useSubmissions.ts
 │   ├── useMarkingResults.ts
 │   ├── useBatchPolling.ts
-│   └── useSubscription.ts
+│   ├── useSubscription.ts
+│   └── useAllSubjects.ts
 │
 ├── lib/
 │   ├── supabase/

@@ -63,3 +63,32 @@ export async function getTutorSubjects(tutorId: string) {
   if (error) throw error;
   return data;
 }
+
+export async function updateTutorProfile(
+  tutorId: string,
+  fullName: string,
+  markingLanguage: 'sinhala' | 'tamil' | 'english',
+) {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('tutors')
+    .update({ full_name: fullName, marking_language: markingLanguage })
+    .eq('id', tutorId)
+    .select('id, email, full_name, marking_language, plan')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function replaceTutorSubjects(tutorId: string, subjectIds: string[]) {
+  const supabase = await createServerClient();
+  const { error: deleteError } = await supabase
+    .from('tutor_subjects')
+    .delete()
+    .eq('tutor_id', tutorId);
+  if (deleteError) throw deleteError;
+
+  const rows = subjectIds.map((subjectId) => ({ tutor_id: tutorId, subject_id: subjectId }));
+  const { error: insertError } = await supabase.from('tutor_subjects').insert(rows);
+  if (insertError) throw insertError;
+}
