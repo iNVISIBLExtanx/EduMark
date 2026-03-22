@@ -1,6 +1,6 @@
 import useSWR from 'swr';
 
-interface MarkingResult {
+export interface MarkingResult {
   id: string;
   question_no: number;
   max_marks: number;
@@ -8,6 +8,7 @@ interface MarkingResult {
   student_answer_text: string;
   feedback: string;
   ocr_confidence: string;
+  tutor_override: boolean;
   override_marks: number | null;
   override_feedback: string | null;
 }

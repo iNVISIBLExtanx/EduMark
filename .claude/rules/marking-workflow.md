@@ -56,11 +56,22 @@ The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, tota
    - `updateBatchStatus(batchId, 'completed')` — or `'failed'` if all results failed
 5. Return `{ status: 'completed' | 'failed', marked, total }`
 
+### Step 5.5: Fetch Batch Marking Results
+`GET /api/batches/[id]/results` → returns all marking results for all submissions in the batch.
+Joins `marking_results` through `submissions` where `submissions.batch_id = batchId`.
+Includes override fields: `tutor_override`, `override_marks`, `override_feedback`.
+Used by `SubmissionResultsPanel.tsx` in `BatchDetail.tsx` to display expandable results.
+Checks batch ownership via `getBatchById(id, user.id)` before returning data.
+
 ### Step 6: Tutor Review
-Tutor reviews each submission in `MarkingReview.tsx`:
-- Sees each question: student answer, awarded marks, feedback
-- Can override marks and feedback (saves to `override_marks`, `override_feedback`)
-- `PATCH /api/submissions/[id]/override`
+Tutor reviews batch results via expandable rows in `BatchDetail.tsx`:
+- Each marked submission has a "View Results" button that expands `SubmissionResultsPanel.tsx`
+- `GET /api/batches/[id]/results` retrieves all marking results for the batch
+- `SubmissionResultsPanel` renders `MarkingSummary` (total + override-adjusted marks) and `QuestionFeedbackCard` per question
+- `QuestionFeedbackCard` shows: question number, student answer (OCR), AI-awarded marks, feedback, with language-aware fonts
+- Tutor can click "Edit" on any question to override marks and feedback
+- `PATCH /api/submissions/[id]/override` saves `result_id`, `override_marks`, `override_feedback` to `marking_results`
+- Override display: "Edited" badge, override values shown instead of AI values, `MarkingSummary` shows "Includes tutor adjustments"
 
 ### Step 7: Approve & Download Report
 Once tutor approves, `GET /api/reports/[submissionId]`:

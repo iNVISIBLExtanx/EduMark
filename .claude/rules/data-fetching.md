@@ -97,5 +97,5 @@ export async function apiUpload<T>(url: string, formData: FormData): Promise<T> 
 | `useBatches` | `/api/batches` | all batches for tutor |
 | `useBatchDetail` | `/api/batches/[id]` | single batch with submissions |
 | `useSubmissions` | `/api/batches/[id]/submissions` | submissions in a batch |
-| `useMarkingResults` | `/api/submissions/[id]` | per-submission results |
+| `useMarkingResults` | `/api/submissions/[id]` | per-submission results (exports `MarkingResult` interface with `tutor_override`, `override_marks`, `override_feedback` fields) |
 | `useBatchPolling` | `/api/batches/[id]/poll` | polls Claude Batch API during processing |

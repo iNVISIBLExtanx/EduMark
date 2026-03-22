@@ -322,4 +322,6 @@ Rules:
 | Function | Description |
 |----------|-------------|
 | `getMarkingResultsBySubmission(submissionId)` | Get all marking results for a submission |
+| `getMarkingResultsByBatch(batchId)` | Get all marking results for all submissions in a batch (inner join on submissions) |
 | `saveMarkingResults(submissionId, result)` | Bulk insert marking result rows from parsed Claude JSON |
+| `updateMarkingOverride(resultId, submissionId, overrideMarks, overrideFeedback)` | Update tutor override fields (`tutor_override`, `override_marks`, `override_feedback`) on a marking result row |

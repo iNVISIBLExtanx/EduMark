@@ -6,7 +6,7 @@
 - **lucide-react** for icons
 
 ## Component Rules
-1. All page-level components (`BatchList`, `MarkingReview`, etc.) are `'use client'` components
+1. All page-level components (`BatchList`, `BatchDetail`, `SubmissionResultsPanel`, etc.) are `'use client'` components
 2. `page.tsx` files have NO `'use client'` directive — they are server components that just render one child
 3. Never pass server-fetched data as props through `page.tsx` — use SWR hooks inside the component
 

@@ -49,7 +49,8 @@ Claude Code must follow this structure and create new files in the correct place
 │       │       ├── route.ts      # get/update single batch
 │       │       ├── submissions/route.ts  # GET submissions for batch
 │       │       ├── dispatch/route.ts  # POST trigger AI marking
-│       │       └── poll/route.ts      # GET poll Claude Batch API results
+│       │       ├── poll/route.ts      # GET poll Claude Batch API results
+│       │       └── results/route.ts   # GET all marking results for batch
 │       ├── question-papers/
 │       │   └── route.ts          # GET/POST question papers
 │       ├── marking-schemes/
@@ -57,7 +58,9 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── subjects/
 │       │   └── route.ts          # list all subjects
 │       ├── submissions/
-│       │   └── upload/route.ts   # bulk PDF upload endpoint
+│       │   ├── upload/route.ts   # bulk PDF upload endpoint
+│       │   └── [id]/
+│       │       └── override/route.ts  # PATCH tutor mark overrides
 │       ├── reports/
 │       │   └── [id]/download/route.ts # PDF report download
 │       └── stripe/
@@ -73,7 +76,8 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── batches/
 │   │   ├── BatchList.tsx
 │   │   ├── BatchDetail.tsx
-│   │   └── BatchStatusBadge.tsx
+│   │   ├── BatchStatusBadge.tsx
+│   │   └── SubmissionResultsPanel.tsx
 │   ├── marking/
 │   │   ├── MarkingSummary.tsx
 │   │   └── QuestionFeedbackCard.tsx
