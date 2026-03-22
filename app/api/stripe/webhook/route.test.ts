@@ -58,8 +58,7 @@ describe('POST /api/stripe/webhook', () => {
     });
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_123',
-      items: { data: [{ price: { id: 'price_starter' } }] },
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ price: { id: 'price_starter' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     const res = await POST(makeWebhookRequest('{}'));
@@ -106,7 +105,7 @@ describe('POST /api/stripe/webhook', () => {
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_123',
       metadata: { supabase_user_id: 'user-1' },
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     const res = await POST(makeWebhookRequest('{}'));
@@ -145,9 +144,8 @@ describe('POST /api/stripe/webhook', () => {
         object: {
           id: 'sub_123',
           metadata: { supabase_user_id: 'user-1' },
-          items: { data: [{ price: { id: 'price_pro' } }] },
+          items: { data: [{ price: { id: 'price_pro' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
           status: 'active',
-          current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
         },
       },
     });
@@ -227,7 +225,7 @@ describe('POST /api/stripe/webhook', () => {
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_123',
       metadata: {},
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     const res = await POST(makeWebhookRequest('{}'));
@@ -242,9 +240,8 @@ describe('POST /api/stripe/webhook', () => {
         object: {
           id: 'sub_123',
           metadata: {},
-          items: { data: [{ price: { id: 'price_pro' } }] },
+          items: { data: [{ price: { id: 'price_pro' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
           status: 'active',
-          current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
         },
       },
     });
@@ -285,8 +282,7 @@ describe('POST /api/stripe/webhook', () => {
     });
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_unknown',
-      items: { data: [{ price: { id: 'price_unknown_xyz' } }] },
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ price: { id: 'price_unknown_xyz' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     const res = await POST(makeWebhookRequest('{}'));
@@ -314,8 +310,7 @@ describe('POST /api/stripe/webhook', () => {
     });
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_full',
-      items: { data: [{ price: { id: 'price_standard' } }] },
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ price: { id: 'price_standard' }, current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     await POST(makeWebhookRequest('{}'));
@@ -343,8 +338,7 @@ describe('POST /api/stripe/webhook', () => {
     });
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_date',
-      items: { data: [{ price: { id: 'price_starter' } }] },
-      current_period_end: periodEnd,
+      items: { data: [{ price: { id: 'price_starter' }, current_period_end: periodEnd }] },
     });
 
     await POST(makeWebhookRequest('{}'));
@@ -435,7 +429,7 @@ describe('POST /api/stripe/webhook', () => {
     mockStripe.subscriptions.retrieve.mockResolvedValue({
       id: 'sub_renew',
       metadata: { supabase_user_id: 'user-1' },
-      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
+      items: { data: [{ current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30 }] },
     });
 
     await POST(makeWebhookRequest('{}'));

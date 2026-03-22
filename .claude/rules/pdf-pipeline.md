@@ -1,6 +1,9 @@
 # PDF Upload & Processing Pipeline
 
-## Upload Flow
+## Question Paper + Marking Scheme Upload
+The marking scheme PDF is **required** when uploading a question paper — both are uploaded together in `QuestionPaperUploadForm.tsx`. Claude cannot mark papers without a marking scheme (it provides expected answers, mark allocation, and terminology).
+
+## Student Submission Upload Flow
 1. Tutor drags/drops PDFs into `BulkUploader.tsx`
 2. Each PDF uploaded to Supabase Storage via `app/api/submissions/route.ts`
 3. Storage path: `submissions/{tutorId}/{batchId}/{studentId}.pdf`

@@ -51,15 +51,17 @@ export function QuestionPaperUploadForm() {
     }
 
     const schemeFile = schemeFileRef.current?.files?.[0];
-    if (schemeFile) {
-      if (schemeFile.type !== 'application/pdf') {
-        setUploadError('Marking scheme must be a PDF file');
-        return;
-      }
-      if (schemeFile.size > MAX_FILE_SIZE) {
-        setUploadError('Marking scheme must be under 20MB');
-        return;
-      }
+    if (!schemeFile) {
+      setUploadError('Please select a marking scheme PDF');
+      return;
+    }
+    if (schemeFile.type !== 'application/pdf') {
+      setUploadError('Marking scheme must be a PDF file');
+      return;
+    }
+    if (schemeFile.size > MAX_FILE_SIZE) {
+      setUploadError('Marking scheme must be under 20MB');
+      return;
     }
 
     setUploading(true);
@@ -74,13 +76,11 @@ export function QuestionPaperUploadForm() {
 
       const paper = await apiUpload<{ id: string }>('/api/question-papers', paperFormData);
 
-      // Upload marking scheme if provided
-      if (schemeFile) {
-        const schemeFormData = new FormData();
-        schemeFormData.append('file', schemeFile);
-        schemeFormData.append('paper_id', paper.id);
-        await apiUpload('/api/marking-schemes', schemeFormData);
-      }
+      // Upload marking scheme (required for AI marking)
+      const schemeFormData = new FormData();
+      schemeFormData.append('file', schemeFile);
+      schemeFormData.append('paper_id', paper.id);
+      await apiUpload('/api/marking-schemes', schemeFormData);
 
       setSuccess(true);
       reset();
@@ -159,7 +159,7 @@ export function QuestionPaperUploadForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="scheme-file">Marking Scheme PDF (optional)</Label>
+            <Label htmlFor="scheme-file">Marking Scheme PDF</Label>
             <Input
               id="scheme-file"
               type="file"

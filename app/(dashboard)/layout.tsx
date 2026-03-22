@@ -2,6 +2,7 @@ import { createServerClient } from '@/lib/supabase/server';
 import { getTutorByIdOrNull } from '@/lib/db/tutors';
 import { redirect } from 'next/navigation';
 import { PastDueBanner } from '@/components/billing/PastDueBanner';
+import { Shell } from '@/components/layout/Shell';
 
 export default async function DashboardLayout({
   children,
@@ -21,9 +22,9 @@ export default async function DashboardLayout({
   }
 
   return (
-    <>
+    <Shell>
       <PastDueBanner />
       {children}
-    </>
+    </Shell>
   );
 }

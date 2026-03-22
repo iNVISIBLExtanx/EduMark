@@ -6,6 +6,6 @@ interface TutorSubject {
 }
 
 export function useTutorSubjects() {
-  const { data, error, isLoading } = useSWR<TutorSubject[]>('/api/tutor/subjects');
-  return { subjects: data ?? [], error, isLoading };
+  const { data, error, isLoading, mutate } = useSWR<TutorSubject[]>('/api/tutor/subjects');
+  return { subjects: data ?? [], error, isLoading, mutate };
 }

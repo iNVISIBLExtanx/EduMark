@@ -1,6 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useBatches } from '@/hooks/useBatches';
+import { BatchStatusBadge } from './BatchStatusBadge';
+import { LanguageBadge } from '@/components/shared/LanguageBadge';
 
 export function BatchList() {
   const { batches, isLoading, error } = useBatches();
@@ -17,10 +20,16 @@ export function BatchList() {
         <ul className="space-y-2">
           {batches.map((batch) => (
             <li key={batch.id} className="rounded-lg border p-4">
-              <p className="font-medium">{batch.name}</p>
-              <p className="text-sm text-gray-500">
-                {batch.marked_papers}/{batch.total_papers} papers marked &middot; {batch.status}
-              </p>
+              <Link href={`/batches/${batch.id}`} className="block">
+                <p className="font-medium">{batch.name}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm text-gray-500">
+                    {batch.marked_papers}/{batch.total_papers} papers marked
+                  </span>
+                  <BatchStatusBadge status={batch.status} />
+                  <LanguageBadge language={batch.medium} />
+                </div>
+              </Link>
             </li>
           ))}
         </ul>

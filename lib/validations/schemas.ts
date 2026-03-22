@@ -18,6 +18,12 @@ export const onboardingSchema = z.object({
   subject_ids: z.array(z.string().uuid()).min(1).max(6),
 });
 
+export const updateProfileSchema = z.object({
+  full_name: z.string().min(1, 'Name is required').max(200),
+  marking_language: z.enum(['sinhala', 'tamil', 'english']),
+  subject_ids: z.array(z.string().uuid()).min(1, 'Select at least one subject').max(6),
+});
+
 export const questionPaperSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   subject_id: z.string().uuid('Invalid subject'),
@@ -43,5 +49,6 @@ export type OverrideMarksInput = z.infer<typeof overrideMarksSchema>;
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 export type QuestionPaperInput = z.infer<typeof questionPaperSchema>;
 export type MarkingSchemeInput = z.infer<typeof markingSchemeSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type SubmissionFileInput = z.infer<typeof submissionFileSchema>;
 export type SubmissionUploadInput = z.infer<typeof submissionUploadSchema>;

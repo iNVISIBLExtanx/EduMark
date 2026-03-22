@@ -47,5 +47,17 @@ if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 ```
 RLS on the database enforces ownership — the server client uses the user's JWT, so Supabase automatically filters rows by `auth.uid()`.
 
+## Logout
+The logout button is in `components/layout/SidebarNav.tsx`. On click:
+1. Confirmation dialog opens (shadcn `Dialog` with destructive "Log out" button)
+2. On confirm: `createBrowserClient().auth.signOut()` — clears the Supabase session
+3. `router.push('/login')` — redirects to the login page
+
+## Profile Update
+Tutors can edit their full name, marking language, and subjects via the Settings page.
+- `PATCH /api/tutor/profile` — validates with `updateProfileSchema`, calls `updateTutorProfile` + `replaceTutorSubjects`
+- RLS grants `UPDATE (full_name, marking_language)` to authenticated users
+- Subject replacement: deletes existing `tutor_subjects` rows then inserts new ones
+
 ## OAuth Callback
 `app/api/auth/callback/route.ts` handles the Google OAuth code exchange using `supabase.auth.exchangeCodeForSession(code)`.

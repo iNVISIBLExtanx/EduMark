@@ -174,7 +174,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (216 tests, 24 files)
+## Current Test Coverage (274 tests, 29 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -201,3 +201,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
 | `components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |
 | `components/papers/QuestionPaperUploadForm.test.tsx` | 7 | Form render, validation, upload flow |
+| `components/dashboard/DashboardHome.test.tsx` | 13 | Greeting, batches, UpgradeModal, loading/error |
+| `components/settings/SettingsView.test.tsx` | 17 | Profile card, billing card, edit mode, save/cancel, portal |
+| `components/layout/SidebarNav.test.tsx` | 7 | Nav items, logout confirmation dialog, active state |
+| `app/api/tutor/profile/route.test.ts` | 12 | GET/POST/PATCH auth, validation, success, errors |
