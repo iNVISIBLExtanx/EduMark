@@ -62,7 +62,9 @@ Claude Code must follow this structure and create new files in the correct place
 │       │   └── [id]/
 │       │       └── override/route.ts  # PATCH tutor mark overrides
 │       ├── reports/
-│       │   └── [id]/download/route.ts # PDF report download
+│       │   └── [id]/
+│       │       ├── download/route.ts # PDF report download
+│       │       └── approve/route.ts  # POST tutor approves report
 │       └── stripe/
 │           ├── checkout/route.ts
 │           ├── portal/route.ts
@@ -122,7 +124,8 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── billing.ts
 │   │   ├── submissions.ts
 │   │   ├── marking-results.ts
-│   │   └── marking-schemes.ts
+│   │   ├── marking-schemes.ts
+│   │   └── reports.ts            # report CRUD (get, create/update, approve)
 │   ├── ai/
 │   │   ├── claude-client.ts
 │   │   ├── mark-paper.ts
@@ -139,7 +142,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── report-renderer.ts
 │   │   └── fonts/
 │   │       ├── NotoSansSinhala.ttf
-│   │       └── NotoSansTamil.ttf
+│   │       ├── NotoSansTamil.ttf
+│   │       ├── noto-sans-sinhala.ts   # Base64 Sinhala font constant
+│   │       └── noto-sans-tamil.ts     # Base64 Tamil font constant
 │   ├── fetcher.ts                 # generic SWR fetcher
 │   ├── api-client.ts              # typed wrappers around /api routes
 │   └── validations/

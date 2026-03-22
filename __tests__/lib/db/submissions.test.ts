@@ -4,6 +4,7 @@ import {
   getSubmissionsByBatch,
   createStudentAndSubmission,
   updateBatchPaperCount,
+  getSubmissionById,
 } from '@/lib/db/submissions';
 
 beforeEach(() => {
@@ -107,5 +108,51 @@ describe('updateBatchPaperCount', () => {
     mockSupabaseClient.eq.mockResolvedValue({ error: { message: 'update failed' } });
 
     await expect(updateBatchPaperCount('batch-1', 5)).rejects.toEqual({ message: 'update failed' });
+  });
+});
+
+describe('getSubmissionById', () => {
+  it('returns submission with nested student data', async () => {
+    const submission = {
+      id: 'sub-1',
+      student_id: 'st-1',
+      batch_id: 'batch-1',
+      pdf_url: '/paper.pdf',
+      status: 'marked',
+      students: { name: 'Alice', index_no: '001' },
+    };
+    mockSupabaseClient.single.mockResolvedValue({ data: submission, error: null });
+
+    const result = await getSubmissionById('sub-1');
+
+    expect(result).toEqual(submission);
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('submissions');
+    expect(mockSupabaseClient.select).toHaveBeenCalledWith(
+      'id, student_id, batch_id, pdf_url, status, students(name, index_no)',
+    );
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'sub-1');
+  });
+
+  it('throws on error', async () => {
+    mockSupabaseClient.single.mockResolvedValue({ data: null, error: { message: 'not found' } });
+
+    await expect(getSubmissionById('bad-id')).rejects.toEqual({ message: 'not found' });
+  });
+
+  it('returns submission with null index_no', async () => {
+    const submission = {
+      id: 'sub-2',
+      student_id: 'st-2',
+      batch_id: 'batch-2',
+      pdf_url: '/paper2.pdf',
+      status: 'pending',
+      students: { name: 'Bob', index_no: null },
+    };
+    mockSupabaseClient.single.mockResolvedValue({ data: submission, error: null });
+
+    const result = await getSubmissionById('sub-2');
+
+    expect(result).toEqual(submission);
+    expect((result.students as unknown as { index_no: string | null }).index_no).toBeNull();
   });
 });

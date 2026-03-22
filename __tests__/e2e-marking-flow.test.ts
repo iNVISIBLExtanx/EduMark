@@ -1,6 +1,6 @@
 /**
  * End-to-end integration test covering the full tutor workflow
- * from paper upload through to marking results (Phase 1–9).
+ * from paper upload through to report download (Phase 1–10).
  *
  * This test calls the actual route handlers with mocked Supabase/OpenAI/Claude
  * to verify the entire chain works together — not just individual units.
@@ -20,6 +20,8 @@
  *  12. GET /api/batches/[id]/poll           — poll results (completed, store marks)
  *  13. GET /api/batches/[id]/results       — retrieve all marking results for batch
  *  14. PATCH /api/submissions/[id]/override — tutor overrides marks and feedback
+ *  15. POST /api/reports/[id]/approve       — tutor approves report for download
+ *  16. GET /api/reports/[id]/download       — generate and download PDF report
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -81,9 +83,11 @@ vi.mock('@/lib/db/marking-schemes', () => ({
 
 // --- Mock DB layer: tutors ---
 const mockGetTutorSubjects = vi.fn();
+const mockGetTutorById = vi.fn();
 
 vi.mock('@/lib/db/tutors', () => ({
   getTutorSubjects: (...args: unknown[]) => mockGetTutorSubjects(...args),
+  getTutorById: (...args: unknown[]) => mockGetTutorById(...args),
 }));
 
 // --- Mock DB layer: batches ---
@@ -107,6 +111,7 @@ vi.mock('@/lib/db/batches', () => ({
 const mockCreateStudentAndSubmission = vi.fn();
 const mockUpdateBatchPaperCount = vi.fn();
 const mockGetSubmissionsByBatch = vi.fn();
+const mockGetSubmissionById = vi.fn();
 const mockUpdateSubmissionStatus = vi.fn();
 const mockGetSubmissionPdfBuffer = vi.fn();
 
@@ -114,6 +119,7 @@ vi.mock('@/lib/db/submissions', () => ({
   createStudentAndSubmission: (...args: unknown[]) => mockCreateStudentAndSubmission(...args),
   updateBatchPaperCount: (...args: unknown[]) => mockUpdateBatchPaperCount(...args),
   getSubmissionsByBatch: (...args: unknown[]) => mockGetSubmissionsByBatch(...args),
+  getSubmissionById: (...args: unknown[]) => mockGetSubmissionById(...args),
   updateSubmissionStatus: (...args: unknown[]) => mockUpdateSubmissionStatus(...args),
   getSubmissionPdfBuffer: (...args: unknown[]) => mockGetSubmissionPdfBuffer(...args),
 }));
@@ -178,12 +184,34 @@ vi.mock('@/lib/db/billing', () => ({
 // --- Mock DB layer: marking-results ---
 const mockSaveMarkingResults = vi.fn();
 const mockGetMarkingResultsByBatch = vi.fn();
+const mockGetMarkingResultsBySubmission = vi.fn();
 const mockUpdateMarkingOverride = vi.fn();
 
 vi.mock('@/lib/db/marking-results', () => ({
   saveMarkingResults: (...args: unknown[]) => mockSaveMarkingResults(...args),
   getMarkingResultsByBatch: (...args: unknown[]) => mockGetMarkingResultsByBatch(...args),
+  getMarkingResultsBySubmission: (...args: unknown[]) => mockGetMarkingResultsBySubmission(...args),
   updateMarkingOverride: (...args: unknown[]) => mockUpdateMarkingOverride(...args),
+}));
+
+// --- Mock DB layer: reports ---
+const mockGetReportBySubmission = vi.fn();
+const mockCreateOrUpdateReport = vi.fn();
+const mockApproveReport = vi.fn();
+
+vi.mock('@/lib/db/reports', () => ({
+  getReportBySubmission: (...args: unknown[]) => mockGetReportBySubmission(...args),
+  createOrUpdateReport: (...args: unknown[]) => mockCreateOrUpdateReport(...args),
+  approveReport: (...args: unknown[]) => mockApproveReport(...args),
+}));
+
+// --- Mock PDF report renderer ---
+const mockBuildReportHTML = vi.fn();
+const mockGenerateReportPDF = vi.fn();
+
+vi.mock('@/lib/pdf/report-renderer', () => ({
+  buildReportHTML: (...args: unknown[]) => mockBuildReportHTML(...args),
+  generateReportPDF: (...args: unknown[]) => mockGenerateReportPDF(...args),
 }));
 
 // --- Import route handlers and lib functions AFTER mocks ---
@@ -197,6 +225,8 @@ import { POST as postDispatch } from '@/app/api/batches/[id]/dispatch/route';
 import { GET as getPoll } from '@/app/api/batches/[id]/poll/route';
 import { GET as getBatchResults } from '@/app/api/batches/[id]/results/route';
 import { PATCH as patchOverride } from '@/app/api/submissions/[id]/override/route';
+import { POST as postApprove } from '@/app/api/reports/[id]/approve/route';
+import { GET as getDownload } from '@/app/api/reports/[id]/download/route';
 import { retrieveMarkingCriteria } from '@/lib/ai/embeddings';
 import { buildSystemPrompt } from '@/lib/ai/mark-paper';
 import { chunkMarkingScheme } from '@/lib/ai/chunking';
@@ -1427,6 +1457,359 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
     });
   });
 
+  // ─── Step 15: Approve report ────────────────────────────────
+  describe('Step 15: Tutor approves report before download', () => {
+    it('approves report for a marked submission', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        tutor_id: TEST_USER.id,
+        paper_id: PAPER_ID,
+        scheme_id: SCHEME_ID,
+        medium: 'english',
+      });
+      mockApproveReport.mockResolvedValue(undefined);
+
+      const res = await postApprove(
+        new Request('http://localhost/api/reports/test/approve', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.approved).toBe(true);
+
+      // Verify correct submission was approved
+      expect(mockApproveReport).toHaveBeenCalledWith(SUBMISSION_ID);
+      // Verify batch ownership was checked
+      expect(mockGetBatchById).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
+    });
+
+    it('rejects approval when submission is not marked', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'pending',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+
+      const res = await postApprove(
+        new Request('http://localhost/api/reports/test/approve', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('submission_not_marked');
+      expect(mockApproveReport).not.toHaveBeenCalled();
+    });
+
+    it('rejects approval when batch ownership fails', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockRejectedValue(new Error('not found'));
+
+      const res = await postApprove(
+        new Request('http://localhost/api/reports/test/approve', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(404);
+      expect(mockApproveReport).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when submission not found', async () => {
+      authedUser();
+      mockGetSubmissionById.mockRejectedValue(new Error('not found'));
+
+      const res = await postApprove(
+        new Request('http://localhost/api/reports/test/approve', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── Step 16: Download PDF report ─────────────────────────
+  describe('Step 16: Download generated PDF report', () => {
+    function setupDownloadMocks() {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        tutor_id: TEST_USER.id,
+        paper_id: PAPER_ID,
+        scheme_id: SCHEME_ID,
+        medium: 'english',
+      });
+      mockGetReportBySubmission.mockResolvedValue({
+        id: 'report-1',
+        submission_id: SUBMISSION_ID,
+        tutor_approved: true,
+      });
+      mockGetQuestionPaperById.mockResolvedValue({
+        id: PAPER_ID,
+        subjects: { name: 'Physics' },
+      });
+      mockGetTutorById.mockResolvedValue({
+        id: TEST_USER.id,
+        full_name: 'Dr. Test Tutor',
+        marking_language: 'english',
+      });
+      mockGetMarkingResultsBySubmission.mockResolvedValue([
+        {
+          id: RESULT_ID,
+          question_no: 1,
+          awarded_marks: 7,
+          max_marks: 10,
+          feedback: 'Good understanding',
+          student_answer_text: 'F = ma',
+          ocr_confidence: 'high',
+          tutor_override: true,
+          override_marks: 9,
+          override_feedback: 'Excellent work',
+        },
+      ]);
+      mockBuildReportHTML.mockReturnValue('<html>report</html>');
+      mockGenerateReportPDF.mockResolvedValue(Buffer.from('fake-pdf-content'));
+      mockStorageUpload.mockResolvedValue({ data: {}, error: null });
+      mockCreateOrUpdateReport.mockResolvedValue(undefined);
+    }
+
+    it('generates and returns PDF with correct headers', async () => {
+      setupDownloadMocks();
+
+      const res = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('application/pdf');
+      expect(res.headers.get('content-disposition')).toBe(
+        'attachment; filename="report-Kasun_Perera.pdf"'
+      );
+    });
+
+    it('calls buildReportHTML with correct data including override-aware results', async () => {
+      setupDownloadMocks();
+
+      await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(mockBuildReportHTML).toHaveBeenCalledWith(
+        expect.objectContaining({
+          studentName: 'Kasun Perera',
+          indexNo: '12345',
+          subjectName: 'Physics',
+          language: 'english',
+          tutorName: 'Dr. Test Tutor',
+          results: expect.arrayContaining([
+            expect.objectContaining({
+              question_no: 1,
+              tutor_override: true,
+              override_marks: 9,
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('uploads PDF to Supabase Storage with correct path', async () => {
+      setupDownloadMocks();
+
+      await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      // Verify storage upload path: {userId}/{submissionId}.pdf
+      expect(mockStorageUpload).toHaveBeenCalledWith(
+        `${TEST_USER.id}/${SUBMISSION_ID}.pdf`,
+        new Uint8Array(Buffer.from('fake-pdf-content')),
+        { contentType: 'application/pdf', upsert: true },
+      );
+
+      // Verify reports table updated with storage path
+      expect(mockCreateOrUpdateReport).toHaveBeenCalledWith(
+        SUBMISSION_ID,
+        `${TEST_USER.id}/${SUBMISSION_ID}.pdf`,
+      );
+    });
+
+    it('returns 403 when report not approved', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        tutor_id: TEST_USER.id,
+        paper_id: PAPER_ID,
+        scheme_id: SCHEME_ID,
+        medium: 'english',
+      });
+      mockGetReportBySubmission.mockResolvedValue({
+        id: 'report-1',
+        submission_id: SUBMISSION_ID,
+        tutor_approved: false,
+      });
+
+      const res = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('report_not_approved');
+
+      // PDF generation should NOT be called
+      expect(mockBuildReportHTML).not.toHaveBeenCalled();
+      expect(mockGenerateReportPDF).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when no report record exists', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        tutor_id: TEST_USER.id,
+      });
+      mockGetReportBySubmission.mockResolvedValue(null);
+
+      const res = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 400 when submission not marked', async () => {
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'pending',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+
+      const res = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe('submission_not_marked');
+    });
+
+    it('returns 500 on unexpected error during PDF generation', async () => {
+      setupDownloadMocks();
+      mockGenerateReportPDF.mockRejectedValue(new Error('Puppeteer crash'));
+
+      const res = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toBe('Internal server error');
+    });
+  });
+
+  // ─── Cross-cutting: Approve → Download data flow ──────────
+  describe('Cross-cutting: Report approval gates download', () => {
+    it('approve then download succeeds as a chain', async () => {
+      // Step 1: Approve
+      authedUser();
+      mockGetSubmissionById.mockResolvedValue({
+        id: SUBMISSION_ID,
+        batch_id: BATCH_ID,
+        status: 'marked',
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        tutor_id: TEST_USER.id,
+        paper_id: PAPER_ID,
+        scheme_id: SCHEME_ID,
+        medium: 'english',
+      });
+      mockApproveReport.mockResolvedValue(undefined);
+
+      const approveRes = await postApprove(
+        new Request('http://localhost/api/reports/test/approve', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+      expect(approveRes.status).toBe(200);
+
+      // Step 2: Download (report now approved)
+      mockGetReportBySubmission.mockResolvedValue({
+        id: 'report-1',
+        submission_id: SUBMISSION_ID,
+        tutor_approved: true,
+      });
+      mockGetQuestionPaperById.mockResolvedValue({
+        id: PAPER_ID,
+        subjects: { name: 'Physics' },
+      });
+      mockGetTutorById.mockResolvedValue({
+        id: TEST_USER.id,
+        full_name: 'Dr. Test Tutor',
+        marking_language: 'english',
+      });
+      mockGetMarkingResultsBySubmission.mockResolvedValue([
+        { id: RESULT_ID, question_no: 1, awarded_marks: 7, max_marks: 10, feedback: 'Good', student_answer_text: 'F=ma', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+      ]);
+      mockBuildReportHTML.mockReturnValue('<html>report</html>');
+      mockGenerateReportPDF.mockResolvedValue(Buffer.from('pdf'));
+      mockStorageUpload.mockResolvedValue({ data: {}, error: null });
+      mockCreateOrUpdateReport.mockResolvedValue(undefined);
+
+      const downloadRes = await getDownload(
+        new Request('http://localhost/api/reports/test/download'),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+      expect(downloadRes.status).toBe(200);
+      expect(downloadRes.headers.get('content-type')).toBe('application/pdf');
+
+      // Verify the full chain: approve was called, then report generated
+      expect(mockApproveReport).toHaveBeenCalledWith(SUBMISSION_ID);
+      expect(mockGenerateReportPDF).toHaveBeenCalledWith('<html>report</html>');
+    });
+  });
+
   // ─── Cross-cutting: New route auth enforcement ─────────────
   describe('Cross-cutting: New routes reject unauthenticated requests', () => {
     beforeEach(() => {
@@ -1460,6 +1843,22 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
             override_feedback: 'test',
           }),
         }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /api/reports/[id]/approve returns 401', async () => {
+      const res = await postApprove(
+        new Request('http://localhost/test', { method: 'POST' }),
+        { params: Promise.resolve({ id: SUBMISSION_ID }) },
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /api/reports/[id]/download returns 401', async () => {
+      const res = await getDownload(
+        new Request('http://localhost/test'),
         { params: Promise.resolve({ id: SUBMISSION_ID }) },
       );
       expect(res.status).toBe(401);

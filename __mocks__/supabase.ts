@@ -8,6 +8,7 @@ export const mockSupabaseClient = {
   insert: vi.fn().mockReturnThis(),
   update: vi.fn().mockReturnThis(),
   delete: vi.fn().mockReturnThis(),
+  upsert: vi.fn().mockReturnThis(),
   order: vi.fn().mockReturnThis(),
   rpc: vi.fn(),
   auth: {

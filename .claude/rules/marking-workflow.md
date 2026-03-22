@@ -73,8 +73,8 @@ Tutor reviews batch results via expandable rows in `BatchDetail.tsx`:
 - `PATCH /api/submissions/[id]/override` saves `result_id`, `override_marks`, `override_feedback` to `marking_results`
 - Override display: "Edited" badge, override values shown instead of AI values, `MarkingSummary` shows "Includes tutor adjustments"
 
-### Step 7: Approve & Download Report
-Once tutor approves, `GET /api/reports/[submissionId]`:
+### Step 7: Approve & Download Report (IMPLEMENTED)
+Tutor approves via `POST /api/reports/[submissionId]/approve`, then downloads via `GET /api/reports/[submissionId]/download`:
 1. Load marking results (using override values if set)
 2. Render report HTML → Puppeteer → PDF
 3. Upload to `reports/` bucket

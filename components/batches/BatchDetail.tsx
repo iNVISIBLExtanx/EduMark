@@ -7,7 +7,8 @@ import { BatchStatusBadge } from './BatchStatusBadge';
 import { LanguageBadge } from '@/components/shared/LanguageBadge';
 import { SubmissionResultsPanel } from './SubmissionResultsPanel';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Check, Loader2 } from 'lucide-react';
+import { createBrowserClient } from '@/lib/supabase/client';
 import {
   Table,
   TableBody,
@@ -21,6 +22,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   const { batch, isLoading, error } = useBatchDetail(batchId);
   const { submissions, isLoading: submissionsLoading } = useSubmissions(batchId);
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;
@@ -28,6 +30,63 @@ export function BatchDetail({ batchId }: { batchId: string }) {
 
   const toggleExpand = (submissionId: string) => {
     setExpandedSubmissionId((prev) => (prev === submissionId ? null : submissionId));
+  };
+
+  const getAuthHeaders = async () => {
+    const supabase = createBrowserClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    return { Authorization: `Bearer ${session?.access_token ?? ''}` };
+  };
+
+  const handleApproveAndDownload = async (submissionId: string) => {
+    setDownloadingId(submissionId);
+    try {
+      const headers = await getAuthHeaders();
+
+      // Approve first
+      const approveRes = await fetch(`/api/reports/${submissionId}/approve`, {
+        method: 'POST',
+        headers,
+      });
+      if (!approveRes.ok) {
+        const err = await approveRes.json().catch(() => ({}));
+        throw new Error(err.error ?? 'Failed to approve report');
+      }
+
+      // Then download
+      await triggerDownload(submissionId, headers);
+    } catch (err) {
+      console.error('Approve & download error:', err);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const handleDownload = async (submissionId: string) => {
+    setDownloadingId(submissionId);
+    try {
+      const headers = await getAuthHeaders();
+      await triggerDownload(submissionId, headers);
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const triggerDownload = async (submissionId: string, headers: Record<string, string>) => {
+    const res = await fetch(`/api/reports/${submissionId}/download`, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error ?? 'Failed to download report');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `report-${submissionId}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -68,6 +127,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
               {submissions.map((submission) => {
                 const isExpanded = expandedSubmissionId === submission.id;
                 const isMarked = submission.status === 'marked';
+                const isDownloading = downloadingId === submission.id;
                 return (
                   <Fragment key={submission.id}>
                     <TableRow>
@@ -78,18 +138,48 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                       </TableCell>
                       <TableCell>
                         {isMarked && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => toggleExpand(submission.id)}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4 mr-1" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 mr-1" />
-                            )}
-                            {isExpanded ? 'Hide Results' : 'View Results'}
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleExpand(submission.id)}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 mr-1" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 mr-1" />
+                              )}
+                              {isExpanded ? 'Hide Results' : 'View Results'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isDownloading}
+                              onClick={() => handleApproveAndDownload(submission.id)}
+                              data-testid={`approve-download-${submission.id}`}
+                            >
+                              {isDownloading ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <Check className="h-4 w-4 mr-1" />
+                              )}
+                              Approve & Download
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isDownloading}
+                              onClick={() => handleDownload(submission.id)}
+                              data-testid={`download-${submission.id}`}
+                            >
+                              {isDownloading ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4 mr-1" />
+                              )}
+                              Download Report
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -110,8 +200,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
           </Table>
         )}
       </div>
-
-      {/* TODO Phase 10: Add "Download Report" links per submission */}
     </div>
   );
 }
