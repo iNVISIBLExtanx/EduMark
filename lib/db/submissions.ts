@@ -70,6 +70,17 @@ export async function updateSubmissionStatus(
   if (error) throw error;
 }
 
+export async function getSubmissionById(submissionId: string) {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('submissions')
+    .select('id, student_id, batch_id, pdf_url, status, students(name, index_no)')
+    .eq('id', submissionId)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function getSubmissionPdfBuffer(pdfUrl: string): Promise<Buffer> {
   const supabase = await createServerClient();
   const { data, error } = await supabase.storage

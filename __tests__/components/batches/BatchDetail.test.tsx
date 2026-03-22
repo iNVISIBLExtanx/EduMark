@@ -27,6 +27,16 @@ vi.mock('@/components/ui/button', () => ({
 vi.mock('lucide-react', () => ({
   ChevronDown: () => <span data-testid="chevron-down" />,
   ChevronRight: () => <span data-testid="chevron-right" />,
+  Download: () => <span data-testid="icon-download" />,
+  Check: () => <span data-testid="icon-check" />,
+  Loader2: () => <span data-testid="icon-loader" />,
+}));
+vi.mock('@/lib/supabase/client', () => ({
+  createBrowserClient: () => ({
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'test-token' } } }),
+    },
+  }),
 }));
 
 import { useBatchDetail } from '@/hooks/useBatchDetail';
@@ -196,5 +206,73 @@ describe('BatchDetail', () => {
     fireEvent.click(screen.getByText('Hide Results'));
     expect(screen.queryByTestId('results-panel')).not.toBeInTheDocument();
     expect(screen.getByText('View Results')).toBeInTheDocument();
+  });
+
+  // --- Download/Approve button tests ---
+
+  it('shows Download Report and Approve & Download buttons for marked submissions', () => {
+    render(<BatchDetail batchId="b1" />);
+    // s2 is marked — should have both buttons
+    expect(screen.getByText('Download Report')).toBeInTheDocument();
+    expect(screen.getByText('Approve & Download')).toBeInTheDocument();
+  });
+
+  it('does not show download buttons for pending submissions', () => {
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[0], status: 'pending' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByText('Download Report')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approve & Download')).not.toBeInTheDocument();
+  });
+
+  it('triggers fetch when Approve & Download is clicked', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ approved: true }), blob: () => Promise.resolve(new Blob()) });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[1], status: 'marked' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Approve & Download'));
+
+    // Wait for the async handler to fire
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/reports/s2/approve',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('triggers download fetch when Download Report is clicked', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob()) });
+    vi.stubGlobal('fetch', mockFetch);
+
+    mockUseSubmissions.mockReturnValue({
+      ...defaultSubmissions,
+      submissions: [
+        { ...defaultSubmissions.submissions[1], status: 'marked' },
+      ],
+    });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Download Report'));
+
+    await vi.waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/reports/s2/download',
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-token' }) }),
+      );
+    });
+
+    vi.unstubAllGlobals();
   });
 });
