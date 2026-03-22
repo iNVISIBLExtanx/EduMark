@@ -26,23 +26,35 @@ Used by `useSubmissions` hook in `BatchDetail.tsx` to display the submissions ta
 Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 
 ### Step 4: Dispatch to Claude
-`POST /api/batches/[id]/dispatch` →
-1. Load all `pending` submissions for batch
-2. Get signed URLs → download PDFs → convert to base64 images (`pdfToImages`)
-3. Build system prompt with cached marking scheme block
-4. Submit one Batch API job with all students as individual requests
-5. Save `claude_batch_id` to batch, set status `processing`
+`POST /api/batches/[id]/dispatch` → implemented in `lib/ai/batch-dispatcher.ts:dispatchMarkingBatch()`
+
+Order of operations (billing BEFORE Claude):
+1. `getBatchById(batchId, tutorId)` — verify ownership, get `paper_id`, `scheme_id`, `medium`
+2. `getSubmissionsByBatch(batchId)` — filter to `pending` submissions only
+3. `checkAndDeductMinutes(tutorId, pendingCount)` — billing gate BEFORE touching Claude
+4. `updateBatchStatus(batchId, 'processing')`
+5. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
+6. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
+7. `buildSystemPrompt(subject, medium, schemeText)` — cached system block
+8. For each submission: `getSubmissionPdfBuffer(pdf_url)` → `pdfToImages(buffer)` → base64 images
+9. `anthropic.beta.messages.batches.create({ requests })` — single Batch API job, `custom_id = submission.id`
+10. `updateBatchClaudeBatchId(batchId, claudeBatchId)` + update each submission to `processing`
+
+The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, totalPapers)` before calling the dispatcher, returning 402 with `{ error, available, needed }` if insufficient.
 
 ### Step 5: Poll & Store Results
-`GET /api/batches/[id]/results` (called by `useBatchPolling` hook every 15s) →
-1. Check Anthropic Batch status via `anthropic.beta.messages.batches.retrieve(claudeBatchId)`
-2. If `processing_status === 'ended'`:
-   - Stream results via `anthropic.beta.messages.batches.results(claudeBatchId)`
-   - Parse JSON from each result message
-   - Save to `marking_results` per question
-   - Update `submissions.status = 'marked'`
-   - Increment `batches.marked_papers`
-3. When all submissions marked, set `batches.status = 'completed'`
+`GET /api/batches/[id]/poll` (called by `useBatchPolling` hook every 15s) → implemented in `lib/ai/batch-dispatcher.ts:pollBatchResults()`
+
+1. `getBatchById(batchId, tutorId)` — get `claude_batch_id` (throws if not dispatched)
+2. `anthropic.beta.messages.batches.retrieve(claudeBatchId)` — check status
+3. If `processing_status !== 'ended'`: return `{ status: 'processing', marked, total }`
+4. If `processing_status === 'ended'`:
+   - Iterate `anthropic.beta.messages.batches.results(claudeBatchId)` (async iterable)
+   - For each `succeeded` result: parse JSON → `saveMarkingResults(submissionId, parsed)` → `updateSubmissionStatus(submissionId, 'marked')`
+   - For failed results: `updateSubmissionStatus(submissionId, 'failed')`
+   - `updateBatchMarkedPapers(batchId, markedCount)`
+   - `updateBatchStatus(batchId, 'completed')` — or `'failed'` if all results failed
+5. Return `{ status: 'completed' | 'failed', marked, total }`
 
 ### Step 6: Tutor Review
 Tutor reviews each submission in `MarkingReview.tsx`:

@@ -54,3 +54,21 @@ export async function updateBatchStatus(batchId: string, status: string) {
     .eq('id', batchId);
   if (error) throw error;
 }
+
+export async function updateBatchClaudeBatchId(batchId: string, claudeBatchId: string) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .update({ claude_batch_id: claudeBatchId })
+    .eq('id', batchId);
+  if (error) throw error;
+}
+
+export async function updateBatchMarkedPapers(batchId: string, markedPapers: number) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .update({ marked_papers: markedPapers })
+    .eq('id', batchId);
+  if (error) throw error;
+}

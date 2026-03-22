@@ -52,3 +52,30 @@ export async function updateBatchPaperCount(batchId: string, totalPapers: number
     .eq('id', batchId);
   if (error) throw error;
 }
+
+export async function updateSubmissionStatus(
+  submissionId: string,
+  status: 'pending' | 'processing' | 'marked' | 'failed',
+  claudeReqId?: string,
+) {
+  const supabase = await createServerClient();
+  const update: Record<string, unknown> = { status };
+  if (claudeReqId !== undefined) {
+    update.claude_req_id = claudeReqId;
+  }
+  const { error } = await supabase
+    .from('submissions')
+    .update(update)
+    .eq('id', submissionId);
+  if (error) throw error;
+}
+
+export async function getSubmissionPdfBuffer(pdfUrl: string): Promise<Buffer> {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase.storage
+    .from('submissions')
+    .download(pdfUrl);
+  if (error || !data) throw new Error('Failed to download submission PDF');
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
