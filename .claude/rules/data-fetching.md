@@ -74,7 +74,7 @@ After a mutation, call `mutate()` from the relevant SWR hook to revalidate.
 // hooks/useBatchPolling.ts
 export function useBatchPolling(batchId: string, enabled: boolean) {
   const { data, error } = useSWR(
-    enabled ? `/api/batches/${batchId}/results` : null,
+    enabled ? `/api/batches/${batchId}/poll` : null,
     { refreshInterval: 15000 }   // poll every 15s while enabled
   );
   return { results: data, isDone: data?.status === 'completed', error };
@@ -98,4 +98,4 @@ export async function apiUpload<T>(url: string, formData: FormData): Promise<T> 
 | `useBatchDetail` | `/api/batches/[id]` | single batch with submissions |
 | `useSubmissions` | `/api/batches/[id]/submissions` | submissions in a batch |
 | `useMarkingResults` | `/api/submissions/[id]` | per-submission results |
-| `useBatchPolling` | `/api/batches/[id]/results` | polls during processing |
+| `useBatchPolling` | `/api/batches/[id]/poll` | polls Claude Batch API during processing |

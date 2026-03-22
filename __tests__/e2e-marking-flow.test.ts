@@ -1,8 +1,8 @@
 /**
  * End-to-end integration test covering the full tutor workflow
- * from paper upload through to embedding generation (Phase 1–6).
+ * from paper upload through to marking results (Phase 1–8).
  *
- * This test calls the actual route handlers with mocked Supabase/OpenAI
+ * This test calls the actual route handlers with mocked Supabase/OpenAI/Claude
  * to verify the entire chain works together — not just individual units.
  *
  * Flow:
@@ -15,6 +15,9 @@
  *   7. Verify billing gate blocks dispatch when subscription inactive
  *   8. Verify retrieveMarkingCriteria returns relevant chunks
  *   9. Verify buildSystemPrompt produces correct prompt with RAG context
+ *  10. POST /api/batches/[id]/dispatch     — dispatch batch to Claude Batch API
+ *  11. GET /api/batches/[id]/poll           — poll results (processing)
+ *  12. GET /api/batches/[id]/poll           — poll results (completed, store marks)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -84,29 +87,41 @@ vi.mock('@/lib/db/tutors', () => ({
 const mockCreateBatch = vi.fn();
 const mockGetBatchById = vi.fn();
 const mockGetBatchesByTutor = vi.fn();
+const mockUpdateBatchStatus = vi.fn();
+const mockUpdateBatchClaudeBatchId = vi.fn();
+const mockUpdateBatchMarkedPapers = vi.fn();
 
 vi.mock('@/lib/db/batches', () => ({
   createBatch: (...args: unknown[]) => mockCreateBatch(...args),
   getBatchById: (...args: unknown[]) => mockGetBatchById(...args),
   getBatchesByTutor: (...args: unknown[]) => mockGetBatchesByTutor(...args),
+  updateBatchStatus: (...args: unknown[]) => mockUpdateBatchStatus(...args),
+  updateBatchClaudeBatchId: (...args: unknown[]) => mockUpdateBatchClaudeBatchId(...args),
+  updateBatchMarkedPapers: (...args: unknown[]) => mockUpdateBatchMarkedPapers(...args),
 }));
 
 // --- Mock DB layer: submissions ---
 const mockCreateStudentAndSubmission = vi.fn();
 const mockUpdateBatchPaperCount = vi.fn();
 const mockGetSubmissionsByBatch = vi.fn();
+const mockUpdateSubmissionStatus = vi.fn();
+const mockGetSubmissionPdfBuffer = vi.fn();
 
 vi.mock('@/lib/db/submissions', () => ({
   createStudentAndSubmission: (...args: unknown[]) => mockCreateStudentAndSubmission(...args),
   updateBatchPaperCount: (...args: unknown[]) => mockUpdateBatchPaperCount(...args),
   getSubmissionsByBatch: (...args: unknown[]) => mockGetSubmissionsByBatch(...args),
+  updateSubmissionStatus: (...args: unknown[]) => mockUpdateSubmissionStatus(...args),
+  getSubmissionPdfBuffer: (...args: unknown[]) => mockGetSubmissionPdfBuffer(...args),
 }));
 
 // --- Mock PDF processing ---
 const mockGetPdfPageCount = vi.fn();
+const mockPdfToImages = vi.fn();
 
 vi.mock('@/lib/pdf/pdf-to-images', () => ({
   getPdfPageCount: (...args: unknown[]) => mockGetPdfPageCount(...args),
+  pdfToImages: (...args: unknown[]) => mockPdfToImages(...args),
 }));
 
 // --- Mock billing ---
@@ -131,6 +146,39 @@ vi.mock('@/lib/ai/openai-client', () => ({
   },
 }));
 
+// --- Mock Anthropic (Claude Batch API) ---
+const mockBatchesCreate = vi.fn();
+const mockBatchesRetrieve = vi.fn();
+const mockBatchesResults = vi.fn();
+
+vi.mock('@/lib/ai/claude-client', () => ({
+  anthropic: {
+    beta: {
+      messages: {
+        batches: {
+          create: (...args: unknown[]) => mockBatchesCreate(...args),
+          retrieve: (...args: unknown[]) => mockBatchesRetrieve(...args),
+          results: (...args: unknown[]) => mockBatchesResults(...args),
+        },
+      },
+    },
+  },
+}));
+
+// --- Mock DB layer: billing ---
+const mockCheckAndDeductMinutes = vi.fn();
+
+vi.mock('@/lib/db/billing', () => ({
+  checkAndDeductMinutes: (...args: unknown[]) => mockCheckAndDeductMinutes(...args),
+}));
+
+// --- Mock DB layer: marking-results ---
+const mockSaveMarkingResults = vi.fn();
+
+vi.mock('@/lib/db/marking-results', () => ({
+  saveMarkingResults: (...args: unknown[]) => mockSaveMarkingResults(...args),
+}));
+
 // --- Import route handlers and lib functions AFTER mocks ---
 import { POST as postQuestionPaper, GET as getQuestionPapers } from '@/app/api/question-papers/route';
 import { POST as postMarkingScheme } from '@/app/api/marking-schemes/route';
@@ -139,6 +187,7 @@ import { POST as postBatch, GET as getBatches } from '@/app/api/batches/route';
 import { POST as postSubmissions } from '@/app/api/submissions/upload/route';
 import { GET as getSubmissions } from '@/app/api/batches/[id]/submissions/route';
 import { POST as postDispatch } from '@/app/api/batches/[id]/dispatch/route';
+import { GET as getPoll } from '@/app/api/batches/[id]/poll/route';
 import { retrieveMarkingCriteria } from '@/lib/ai/embeddings';
 import { buildSystemPrompt } from '@/lib/ai/mark-paper';
 import { chunkMarkingScheme } from '@/lib/ai/chunking';
@@ -871,6 +920,322 @@ describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
       }));
 
       expect(res.status).toBe(400);
+    });
+  });
+
+  // ─── Step 10: Dispatch batch to Claude ──────────────────────
+  describe('Step 10: Dispatch batch to Claude Batch API', () => {
+    const CLAUDE_BATCH_ID = 'msgbatch_e2e_test_001';
+
+    it('dispatches batch and returns claude_batch_id', async () => {
+      authedUser();
+      // Billing gate: active subscription with enough minutes
+      mockGetBillingStatus.mockResolvedValue({
+        plan: 'standard',
+        ai_minutes_used: 0,
+        ai_minutes_limit: 150,
+        subscription_status: 'active',
+        billing_period_end: '2026-04-01',
+      });
+      // Batch with 1 submission
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'pending',
+        medium: 'english',
+        total_papers: 1,
+        marked_papers: 0,
+        paper_id: PAPER_ID,
+        scheme_id: SCHEME_ID,
+        claude_batch_id: null,
+      });
+      // Submissions
+      mockGetSubmissionsByBatch.mockResolvedValue([
+        {
+          id: SUBMISSION_ID,
+          student_id: STUDENT_ID,
+          pdf_url: `${TEST_USER.id}/${BATCH_ID}/${STUDENT_ID}.pdf`,
+          page_count: 4,
+          status: 'pending',
+          created_at: '2026-03-22T00:00:00Z',
+          students: { name: 'Kasun Perera', index_no: '12345' },
+        },
+      ]);
+      // Billing deduction succeeds
+      mockCheckAndDeductMinutes.mockResolvedValue(undefined);
+      // Batch status update
+      mockUpdateBatchStatus.mockResolvedValue(undefined);
+      // Marking scheme
+      mockGetMarkingSchemeById.mockResolvedValue({
+        id: SCHEME_ID,
+        paper_id: PAPER_ID,
+        structure_json: MARKING_SCHEME_STRUCTURE,
+        embeddings_done: true,
+      });
+      // Question paper with subject
+      mockGetQuestionPaperById.mockResolvedValue({
+        id: PAPER_ID,
+        title: '2024 A/L Physics Paper I',
+        subject_id: SUBJECT_ID,
+        subjects: [{ name: 'Physics', code: 'PHY' }],
+      });
+      // PDF download + conversion
+      mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
+      mockPdfToImages.mockResolvedValue({
+        images: ['base64img1', 'base64img2'],
+        pageCount: 2,
+      });
+      // Claude Batch API
+      mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
+      // Save claude_batch_id
+      mockUpdateBatchClaudeBatchId.mockResolvedValue(undefined);
+      // Update submission status
+      mockUpdateSubmissionStatus.mockResolvedValue(undefined);
+
+      const res = await postDispatch(
+        new Request('http://localhost/api/batches/test/dispatch', { method: 'POST' }),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.claude_batch_id).toBe(CLAUDE_BATCH_ID);
+      expect(body.status).toBe('processing');
+
+      // Verify billing was deducted BEFORE Claude API
+      expect(mockCheckAndDeductMinutes).toHaveBeenCalledWith(TEST_USER.id, 1);
+      expect(mockBatchesCreate).toHaveBeenCalled();
+
+      // Verify batch status set to processing
+      expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'processing');
+
+      // Verify claude_batch_id was saved
+      expect(mockUpdateBatchClaudeBatchId).toHaveBeenCalledWith(BATCH_ID, CLAUDE_BATCH_ID);
+
+      // Verify Batch API request has cache_control on system block
+      const batchCreateArgs = mockBatchesCreate.mock.calls[0][0];
+      expect(batchCreateArgs.requests).toHaveLength(1);
+      expect(batchCreateArgs.requests[0].custom_id).toBe(SUBMISSION_ID);
+      expect(batchCreateArgs.requests[0].params.system[0].cache_control).toEqual({ type: 'ephemeral' });
+      expect(batchCreateArgs.requests[0].params.model).toBe('claude-sonnet-4-6');
+    });
+
+    it('returns 402 when AI minutes insufficient for batch size', async () => {
+      authedUser();
+      mockGetBillingStatus.mockResolvedValue({
+        plan: 'starter',
+        ai_minutes_used: 49,
+        ai_minutes_limit: 50,
+        subscription_status: 'active',
+        billing_period_end: '2026-04-01',
+      });
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'pending',
+        total_papers: 5,
+        marked_papers: 0,
+      });
+
+      const res = await postDispatch(
+        new Request('http://localhost/api/batches/test/dispatch', { method: 'POST' }),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(402);
+      const body = await res.json();
+      expect(body.error).toBe('insufficient_ai_minutes');
+      expect(body.available).toBe(1);
+      expect(body.needed).toBe(5);
+
+      // Claude API should NOT be called
+      expect(mockBatchesCreate).not.toHaveBeenCalled();
+      expect(mockCheckAndDeductMinutes).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Step 11: Poll batch results (processing) ─────────────
+  describe('Step 11: Poll batch results while processing', () => {
+    it('returns processing status with progress', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'processing',
+        total_papers: 3,
+        marked_papers: 0,
+        claude_batch_id: 'msgbatch_e2e_test_001',
+      });
+      mockBatchesRetrieve.mockResolvedValue({
+        processing_status: 'in_progress',
+      });
+
+      const res = await getPoll(
+        new Request('http://localhost/api/batches/test/poll'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('processing');
+      expect(body.marked).toBe(0);
+      expect(body.total).toBe(3);
+
+      // Results should NOT be iterated while still processing
+      expect(mockBatchesResults).not.toHaveBeenCalled();
+      expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Step 12: Poll batch results (completed) ──────────────
+  describe('Step 12: Poll batch results when completed', () => {
+    const MOCK_MARKING_RESULT = {
+      questions: [
+        {
+          question_no: 1,
+          max_marks: 10,
+          awarded_marks: 7,
+          student_answer_text: 'F = ma, force is proportional to mass and acceleration',
+          feedback: 'Good understanding of Newton\'s second law',
+          ocr_confidence: 'high' as const,
+        },
+        {
+          question_no: 2,
+          max_marks: 15,
+          awarded_marks: 12,
+          student_answer_text: 'Energy cannot be created or destroyed',
+          feedback: 'Correct explanation of conservation of energy',
+          ocr_confidence: 'high' as const,
+        },
+      ],
+      total_awarded: 19,
+      total_max: 25,
+      general_feedback: 'Good performance overall',
+    };
+
+    it('stores marking results and updates batch to completed', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'processing',
+        total_papers: 1,
+        marked_papers: 0,
+        claude_batch_id: 'msgbatch_e2e_test_001',
+      });
+      mockBatchesRetrieve.mockResolvedValue({
+        processing_status: 'ended',
+      });
+      // Claude returns results as async iterable
+      mockBatchesResults.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            custom_id: SUBMISSION_ID,
+            result: {
+              type: 'succeeded',
+              message: {
+                content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
+              },
+            },
+          };
+        },
+      });
+      mockSaveMarkingResults.mockResolvedValue(undefined);
+      mockUpdateSubmissionStatus.mockResolvedValue(undefined);
+      mockUpdateBatchMarkedPapers.mockResolvedValue(undefined);
+      mockUpdateBatchStatus.mockResolvedValue(undefined);
+
+      const res = await getPoll(
+        new Request('http://localhost/api/batches/test/poll'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('completed');
+      expect(body.marked).toBe(1);
+      expect(body.total).toBe(1);
+
+      // Verify marking results were saved with correct data
+      expect(mockSaveMarkingResults).toHaveBeenCalledWith(SUBMISSION_ID, MOCK_MARKING_RESULT);
+
+      // Verify submission status updated to 'marked'
+      expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID, 'marked');
+
+      // Verify batch marked count and status updated
+      expect(mockUpdateBatchMarkedPapers).toHaveBeenCalledWith(BATCH_ID, 1);
+      expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'completed');
+    });
+
+    it('marks submission as failed when Claude returns error result', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'processing',
+        total_papers: 1,
+        marked_papers: 0,
+        claude_batch_id: 'msgbatch_e2e_test_001',
+      });
+      mockBatchesRetrieve.mockResolvedValue({ processing_status: 'ended' });
+      mockBatchesResults.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            custom_id: SUBMISSION_ID,
+            result: { type: 'errored', error: { message: 'Internal error' } },
+          };
+        },
+      });
+      mockUpdateSubmissionStatus.mockResolvedValue(undefined);
+      mockUpdateBatchMarkedPapers.mockResolvedValue(undefined);
+      mockUpdateBatchStatus.mockResolvedValue(undefined);
+
+      const res = await getPoll(
+        new Request('http://localhost/api/batches/test/poll'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('failed');
+      expect(body.marked).toBe(0);
+
+      // Submission marked as failed
+      expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID, 'failed');
+      // Marking results NOT saved for failed result
+      expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+      // Batch status set to failed (all results failed)
+      expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'failed');
+    });
+
+    it('returns 400 when batch has not been dispatched', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({
+        id: BATCH_ID,
+        status: 'pending',
+        total_papers: 1,
+        marked_papers: 0,
+        claude_batch_id: null,
+      });
+
+      const res = await getPoll(
+        new Request('http://localhost/api/batches/test/poll'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('not been dispatched');
+    });
+  });
+
+  // ─── Cross-cutting: New route auth enforcement ─────────────
+  describe('Cross-cutting: New routes reject unauthenticated requests', () => {
+    beforeEach(() => {
+      mockGetUser.mockResolvedValue({ data: { user: null } });
+    });
+
+    it('GET /api/batches/[id]/poll returns 401', async () => {
+      const res = await getPoll(
+        new Request('http://localhost/test'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+      expect(res.status).toBe(401);
     });
   });
 });

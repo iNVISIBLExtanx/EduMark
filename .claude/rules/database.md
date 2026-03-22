@@ -294,3 +294,32 @@ Rules:
   - Stripe webhook (service-role client), or
   - `increment_ai_minutes_used` / `add_topup_minutes` SQL functions.
 - Never update billing fields from client-context API routes using the anon client.
+
+---
+
+## Query Functions Reference
+
+### `lib/db/batches.ts`
+| Function | Description |
+|----------|-------------|
+| `getBatchesByTutor(tutorId)` | List batches for a tutor |
+| `getBatchById(batchId, tutorId)` | Get single batch (ownership check via tutor_id) |
+| `createBatch(input)` | Create batch with paper, scheme, medium |
+| `updateBatchStatus(batchId, status)` | Update batch status (pending/processing/completed/failed) |
+| `updateBatchClaudeBatchId(batchId, claudeBatchId)` | Save Anthropic Batch API job ID |
+| `updateBatchMarkedPapers(batchId, markedPapers)` | Update marked paper count |
+
+### `lib/db/submissions.ts`
+| Function | Description |
+|----------|-------------|
+| `getSubmissionsByBatch(batchId)` | List submissions with nested student data |
+| `createStudentAndSubmission(input)` | Create student + submission atomically |
+| `updateBatchPaperCount(batchId, total)` | Update total_papers count |
+| `updateSubmissionStatus(submissionId, status, claudeReqId?)` | Update submission status + optional claude_req_id |
+| `getSubmissionPdfBuffer(pdfUrl)` | Download PDF from Supabase Storage, return Buffer |
+
+### `lib/db/marking-results.ts`
+| Function | Description |
+|----------|-------------|
+| `getMarkingResultsBySubmission(submissionId)` | Get all marking results for a submission |
+| `saveMarkingResults(submissionId, result)` | Bulk insert marking result rows from parsed Claude JSON |

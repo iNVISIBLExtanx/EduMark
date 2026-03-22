@@ -48,7 +48,8 @@ Claude Code must follow this structure and create new files in the correct place
 │       │   └── [id]/
 │       │       ├── route.ts      # get/update single batch
 │       │       ├── submissions/route.ts  # GET submissions for batch
-│       │       └── dispatch/route.ts  # trigger AI marking
+│       │       ├── dispatch/route.ts  # POST trigger AI marking
+│       │       └── poll/route.ts      # GET poll Claude Batch API results
 │       ├── question-papers/
 │       │   └── route.ts          # GET/POST question papers
 │       ├── marking-schemes/

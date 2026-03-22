@@ -112,44 +112,80 @@ The `match_marking_criteria` Postgres function uses `<=>` cosine distance on the
 
 ---
 
-## Batch Dispatcher Pattern
+## Batch Dispatcher (lib/ai/batch-dispatcher.ts) — IMPLEMENTED
+
+Two exported functions: `dispatchMarkingBatch` and `pollBatchResults`.
+
+### `dispatchMarkingBatch(batchId, tutorId)`
+
+Critical: billing deduction happens BEFORE any Claude API call.
 
 ```typescript
-// lib/ai/batch-dispatcher.ts
-export async function dispatchMarkingBatch(batchId: string) {
-  const { submissions, scheme, subject, medium } = await loadBatchContext(batchId);
-  const markingSchemeText = await buildMarkingSchemeContext(scheme.id);
+// Simplified flow — see lib/ai/batch-dispatcher.ts for full implementation
+export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
+  const batch = await getBatchById(batchId, tutorId);
+  const submissions = (await getSubmissionsByBatch(batchId)).filter(s => s.status === 'pending');
+  if (submissions.length === 0) throw new Error('no_pending_submissions');
+
+  await checkAndDeductMinutes(tutorId, submissions.length);  // billing FIRST
+  await updateBatchStatus(batchId, 'processing');
+
+  const scheme = await getMarkingSchemeById(batch.scheme_id);
+  const paper = await getQuestionPaperById(batch.paper_id, tutorId);
+  const subjectName = paper.subjects?.[0]?.name ?? 'General';
+  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, JSON.stringify(scheme.structure_json));
 
   const requests = await Promise.all(submissions.map(async (sub) => {
-    const images = await pdfToImages(sub.pdf_url);
+    const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
+    const { images } = await pdfToImages(pdfBuffer);
     return {
       custom_id: sub.id,
       params: {
         model: 'claude-sonnet-4-6',
         max_tokens: 4000,
-        system: [{ type: 'text', text: buildSystemPrompt(subject, medium, markingSchemeText),
-                   cache_control: { type: 'ephemeral' } }],
-        messages: [{
-          role: 'user',
-          content: [
-            ...images.map(img => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: img } })),
-            { type: 'text', text: 'Mark this paper per the scheme. Return JSON only.' }
-          ]
-        }]
-      }
+        system: [{ type: 'text', text: systemPromptText, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: [
+          ...images.map(img => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: img } })),
+          { type: 'text', text: 'Mark this paper per the scheme. Return JSON only.' },
+        ]}],
+      },
     };
   }));
 
-  const batch = await anthropic.beta.messages.batches.create({ requests });
-  // Save batch.id to DB, set status to 'processing'
-  return batch.id;
+  const batchJob = await anthropic.beta.messages.batches.create({ requests });
+  await updateBatchClaudeBatchId(batchId, batchJob.id);
+  return batchJob.id;
+}
+```
+
+### `pollBatchResults(batchId, tutorId)`
+
+```typescript
+export async function pollBatchResults(batchId: string, tutorId: string): Promise<PollResult> {
+  const batch = await getBatchById(batchId, tutorId);
+  if (!batch.claude_batch_id) throw new Error('batch_not_dispatched');
+
+  const batchJob = await anthropic.beta.messages.batches.retrieve(batch.claude_batch_id);
+  if (batchJob.processing_status !== 'ended') {
+    return { status: 'processing', marked: batch.marked_papers, total: batch.total_papers };
+  }
+
+  // Iterate async results, parse JSON, save to marking_results
+  const results = await anthropic.beta.messages.batches.results(batch.claude_batch_id);
+  for await (const result of results) {
+    // Parse text block → saveMarkingResults() → updateSubmissionStatus('marked')
+    // Failed results → updateSubmissionStatus('failed')
+  }
+
+  await updateBatchMarkedPapers(batchId, markedCount);
+  await updateBatchStatus(batchId, finalStatus);  // 'completed' or 'failed'
+  return { status: finalStatus, marked: markedCount, total: batch.total_papers };
 }
 ```
 
 ---
 
-## Polling Results
-After dispatch, use a background polling mechanism:
-- Frontend: `useBatchPolling` SWR hook polls `/api/batches/[id]/results` every 15 seconds
-- API route checks `anthropic.beta.messages.batches.retrieve(claudeBatchId)` 
-- When `processing_status === 'ended'`, stream results and save to `marking_results` table
+## Polling Route
+- `GET /api/batches/[id]/poll` — calls `pollBatchResults(batchId, user.id)`
+- Frontend: `useBatchPolling` SWR hook polls this endpoint every 15 seconds
+- Returns `{ status: 'processing' | 'completed' | 'failed', marked, total }`

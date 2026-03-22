@@ -177,7 +177,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (387 tests, 37 files)
+## Current Test Coverage (441 tests, 40 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -192,6 +192,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
 | `__tests__/lib/ai/mark-paper.test.ts` | 12 | Prompt construction, response parsing, language |
+| `__tests__/lib/ai/batch-dispatcher.test.ts` | 26 | Dispatch: billing-first, Batch API shape, cache_control. Poll: result parsing, status updates, partial failures |
 | `__tests__/app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `__tests__/app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
 | `__tests__/app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
@@ -201,6 +202,8 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/app/api/marking-schemes/[id]/embeddings/route.test.ts` | 11 | Auth, chunking, embedding generation, error handling |
 | `__tests__/app/api/batches/route.test.ts` | 8 | Auth, validation, paper/scheme ownership |
 | `__tests__/app/api/batches/[id]/submissions/route.test.ts` | 6 | Auth, ownership, submissions listing, error handling |
+| `__tests__/app/api/batches/[id]/dispatch/route.test.ts` | 13 | Auth, billing gate (402), batch ownership, insufficient minutes, dispatch success/errors |
+| `__tests__/app/api/batches/[id]/poll/route.test.ts` | 8 | Auth, processing/completed/failed status, batch_not_dispatched |
 | `__tests__/app/api/submissions/upload/route.test.ts` | 10 | Auth, metadata, batch status, bulk upload |
 | `__tests__/app/api/tutor/profile/route.test.ts` | 12 | GET/POST/PATCH auth, validation, success, errors |
 | `__tests__/hooks/useSubscription.test.ts` | 10 | All derived values, edge cases |
@@ -216,4 +219,4 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/batches/BatchList.test.tsx` | 7 | Loading/error/empty states, links, counts, badges |
 | `__tests__/components/batches/BatchDetail.test.tsx` | 9 | Loading/error/null states, heading, badges, submissions table |
 | `__tests__/components/layout/SidebarNav.test.tsx` | 7 | Nav items, logout confirmation dialog, active state |
-| `__tests__/e2e-marking-flow.test.ts` | 33 | Full tutor workflow: upload, batch, submissions listing, dispatch, mark, report |
+| `__tests__/e2e-marking-flow.test.ts` | 40 | Full tutor workflow: upload, batch, submissions, dispatch to Claude, poll processing, poll completed with result storage |
