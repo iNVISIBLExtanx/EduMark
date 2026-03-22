@@ -94,10 +94,12 @@ vi.mock('@/lib/db/batches', () => ({
 // --- Mock DB layer: submissions ---
 const mockCreateStudentAndSubmission = vi.fn();
 const mockUpdateBatchPaperCount = vi.fn();
+const mockGetSubmissionsByBatch = vi.fn();
 
 vi.mock('@/lib/db/submissions', () => ({
   createStudentAndSubmission: (...args: unknown[]) => mockCreateStudentAndSubmission(...args),
   updateBatchPaperCount: (...args: unknown[]) => mockUpdateBatchPaperCount(...args),
+  getSubmissionsByBatch: (...args: unknown[]) => mockGetSubmissionsByBatch(...args),
 }));
 
 // --- Mock PDF processing ---
@@ -135,6 +137,7 @@ import { POST as postMarkingScheme } from '@/app/api/marking-schemes/route';
 import { POST as postEmbeddings } from '@/app/api/marking-schemes/[id]/embeddings/route';
 import { POST as postBatch, GET as getBatches } from '@/app/api/batches/route';
 import { POST as postSubmissions } from '@/app/api/submissions/upload/route';
+import { GET as getSubmissions } from '@/app/api/batches/[id]/submissions/route';
 import { POST as postDispatch } from '@/app/api/batches/[id]/dispatch/route';
 import { retrieveMarkingCriteria } from '@/lib/ai/embeddings';
 import { buildSystemPrompt } from '@/lib/ai/mark-paper';
@@ -517,6 +520,90 @@ describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
     });
   });
 
+  // ─── Step 6.5: List submissions for a batch ─────────────────
+  describe('Step 6.5: List submissions for a batch', () => {
+    it('returns submissions for an owned batch', async () => {
+      authedUser();
+      mockGetBatchById.mockResolvedValue({ id: BATCH_ID, status: 'pending' });
+      mockGetSubmissionsByBatch.mockResolvedValue([
+        {
+          id: SUBMISSION_ID,
+          student_id: STUDENT_ID,
+          pdf_url: `${TEST_USER.id}/${BATCH_ID}/${STUDENT_ID}.pdf`,
+          page_count: 4,
+          status: 'pending',
+          created_at: '2026-03-22T00:00:00Z',
+          students: { name: 'Kasun Perera', index_no: '12345' },
+        },
+      ]);
+
+      const res = await getSubmissions(
+        new Request('http://localhost/api/batches/test/submissions'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toHaveLength(1);
+      // Verify response shape matches useSubmissions Submission interface
+      expect(body[0]).toEqual(expect.objectContaining({
+        id: SUBMISSION_ID,
+        student_id: STUDENT_ID,
+        pdf_url: expect.stringContaining(BATCH_ID),
+        page_count: 4,
+        status: 'pending',
+        created_at: expect.any(String),
+        students: { name: 'Kasun Perera', index_no: '12345' },
+      }));
+      // Verify ownership was checked with correct user
+      expect(mockGetBatchById).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
+      expect(mockGetSubmissionsByBatch).toHaveBeenCalledWith(BATCH_ID);
+    });
+
+    it('returns 404 when batch belongs to different tutor', async () => {
+      authedUser();
+      mockGetBatchById.mockRejectedValue(new Error('not found'));
+
+      const res = await getSubmissions(
+        new Request('http://localhost/api/batches/test/submissions'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      expect(res.status).toBe(404);
+      // Submissions should never be fetched if ownership fails
+      expect(mockGetSubmissionsByBatch).not.toHaveBeenCalled();
+    });
+
+    it('returns consistent data shape after upload step', async () => {
+      // Simulate: after Step 6 uploaded a submission, listing should return matching IDs
+      authedUser();
+      mockGetBatchById.mockResolvedValue({ id: BATCH_ID, status: 'pending' });
+      mockGetSubmissionsByBatch.mockResolvedValue([
+        {
+          id: SUBMISSION_ID,
+          student_id: STUDENT_ID,
+          pdf_url: `${TEST_USER.id}/${BATCH_ID}/${STUDENT_ID}.pdf`,
+          page_count: 4,
+          status: 'pending',
+          created_at: '2026-03-22T00:00:00Z',
+          students: { name: 'Kasun Perera', index_no: '12345' },
+        },
+      ]);
+
+      const res = await getSubmissions(
+        new Request('http://localhost/api/batches/test/submissions'),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+
+      const body = await res.json();
+      // The submission ID and student ID from listing must match what upload created
+      expect(body[0].id).toBe(SUBMISSION_ID);
+      expect(body[0].student_id).toBe(STUDENT_ID);
+      // pdf_url must contain the batch path used during upload
+      expect(body[0].pdf_url).toContain(BATCH_ID);
+    });
+  });
+
   // ─── Step 7: Billing gate on dispatch ────────────────────────
   describe('Step 7: Billing gate blocks dispatch when inactive', () => {
     it('returns 402 when subscription is past_due', async () => {
@@ -700,6 +787,14 @@ describe('E2E: Tutor marking workflow (Phase 1–6)', () => {
     it('POST /api/batches/[id]/dispatch returns 401', async () => {
       const res = await postDispatch(
         new Request('http://localhost/test', { method: 'POST' }),
+        { params: Promise.resolve({ id: BATCH_ID }) },
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('GET /api/batches/[id]/submissions returns 401', async () => {
+      const res = await getSubmissions(
+        new Request('http://localhost/test'),
         { params: Promise.resolve({ id: BATCH_ID }) },
       );
       expect(res.status).toBe(401);

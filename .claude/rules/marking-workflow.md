@@ -14,11 +14,16 @@ Both are uploaded in a single form submission in `QuestionPaperUploadForm.tsx`.
 `POST /api/marking-schemes/[id]/embeddings` → chunks scheme + generates OpenAI embeddings → stored in `ms_embeddings`
 
 ### Step 3: Bulk Upload Student Papers
-`POST /api/submissions` (multipart) → for each PDF:
+`POST /api/submissions/upload` (multipart) → for each PDF:
 - upload to `submissions/` bucket
 - create `students` record
 - create `submissions` record with status `pending`
 Update `batches.total_papers = N`
+
+### Step 3.5: List Submissions for a Batch
+`GET /api/batches/[id]/submissions` → returns all submissions with nested student data.
+Used by `useSubmissions` hook in `BatchDetail.tsx` to display the submissions table.
+Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 
 ### Step 4: Dispatch to Claude
 `POST /api/batches/[id]/dispatch` →
