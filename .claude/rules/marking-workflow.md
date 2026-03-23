@@ -20,6 +20,8 @@ Both are uploaded in a single form submission in `QuestionPaperUploadForm.tsx`.
 - create `submissions` record with status `pending`
 Update `batches.total_papers = N`
 
+UI: `BulkUploader.tsx` component (rendered in `BatchDetail.tsx` when batch status is `pending`) provides drag-and-drop PDF upload with client-side validation (PDF only, 20MB max, 50 files max).
+
 ### Step 3.5: List Submissions for a Batch
 `GET /api/batches/[id]/submissions` → returns all submissions with nested student data.
 Used by `useSubmissions` hook in `BatchDetail.tsx` to display the submissions table.
@@ -42,6 +44,8 @@ Order of operations (billing BEFORE Claude):
 
 The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, totalPapers)` before calling the dispatcher, returning 402 with `{ error, available, needed }` if insufficient.
 
+UI: `BatchDetail.tsx` shows a 'Mark Papers' button when `batch.status === 'pending'` and submissions exist. Dispatching is blocked with a 400 error if `batch.status !== 'pending'` (double-dispatch prevention). On 402 errors, an `UpgradeModal` is shown.
+
 ### Step 5: Poll & Store Results
 `GET /api/batches/[id]/poll` (called by `useBatchPolling` hook every 15s) → implemented in `lib/ai/batch-dispatcher.ts:pollBatchResults()`
 
@@ -55,6 +59,8 @@ The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, tota
    - `updateBatchMarkedPapers(batchId, markedCount)`
    - `updateBatchStatus(batchId, 'completed')` — or `'failed'` if all results failed
 5. Return `{ status: 'completed' | 'failed', marked, total }`
+
+UI: `useBatchPolling` hook (15s refresh) is wired into `BatchDetail.tsx`. Progress text shows marked/total count during processing. On completion, `useEffect` triggers `mutate()` to refresh batch and submission data.
 
 ### Step 5.5: Fetch Batch Marking Results
 `GET /api/batches/[id]/results` → returns all marking results for all submissions in the batch.

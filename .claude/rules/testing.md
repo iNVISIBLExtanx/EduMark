@@ -177,7 +177,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (578 tests, 51 files)
+## Current Test Coverage (636 tests, 52 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -203,7 +203,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/app/api/marking-schemes/[id]/embeddings/route.test.ts` | 11 | Auth, chunking, embedding generation, error handling |
 | `__tests__/app/api/batches/route.test.ts` | 8 | Auth, validation, paper/scheme ownership |
 | `__tests__/app/api/batches/[id]/submissions/route.test.ts` | 6 | Auth, ownership, submissions listing, error handling |
-| `__tests__/app/api/batches/[id]/dispatch/route.test.ts` | 13 | Auth, billing gate (402), batch ownership, insufficient minutes, dispatch success/errors |
+| `__tests__/app/api/batches/[id]/dispatch/route.test.ts` | 13 | Auth, billing gate (402), batch ownership, insufficient minutes, dispatch success/errors, double-dispatch prevention |
 | `__tests__/app/api/batches/[id]/poll/route.test.ts` | 8 | Auth, processing/completed/failed status, batch_not_dispatched |
 | `__tests__/app/api/batches/[id]/results/route.test.ts` | 8 | Auth, batch ownership, results listing, empty batch |
 | `__tests__/app/api/submissions/upload/route.test.ts` | 10 | Auth, metadata, batch status, bulk upload |
@@ -217,11 +217,12 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
 | `__tests__/components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |
 | `__tests__/components/papers/QuestionPaperUploadForm.test.tsx` | 7 | Form render, validation, upload flow |
-| `__tests__/components/dashboard/DashboardHome.test.tsx` | 13 | Greeting, batches, UpgradeModal, loading/error |
+| `__tests__/components/dashboard/DashboardHome.test.tsx` | 20 | Greeting, batches, UpgradeModal, loading/error, quick stats, upgrade threshold |
 | `__tests__/components/settings/SettingsView.test.tsx` | 17 | Profile card, billing card, edit mode, save/cancel, portal |
 | `__tests__/components/batches/BatchStatusBadge.test.tsx` | 7 | All status styles, fallback, base classes |
 | `__tests__/components/batches/BatchList.test.tsx` | 7 | Loading/error/empty states, links, counts, badges |
-| `__tests__/components/batches/BatchDetail.test.tsx` | 18 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons |
+| `__tests__/components/batches/BatchDetail.test.tsx` | 31 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration |
+| `__tests__/components/batches/BulkUploader.test.tsx` | 25 | Drop zone, file validation, upload, drag-and-drop |
 | `__tests__/components/batches/SubmissionResultsPanel.test.tsx` | 8 | Loading, error, results display, MarkingSummary + QuestionFeedbackCard rendering |
 | `__tests__/components/marking/QuestionFeedbackCard.test.tsx` | 13 | Read-only render, edit toggle, save/cancel flow, override display, language fonts, OCR badge, saving state |
 | `__tests__/components/marking/MarkingSummary.test.tsx` | 4 | Basic render, percentage, override totals, adjustment note |
@@ -230,4 +231,4 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/pdf/report-renderer.test.ts` | 15 | HTML builder, font embedding, overrides, Puppeteer PDF |
 | `__tests__/app/api/reports/[id]/download/route.test.ts` | 12 | Auth, ownership, approval gate, PDF generation, storage upload |
 | `__tests__/app/api/reports/[id]/approve/route.test.ts` | 8 | Auth, ownership, status check, approval success |
-| `__tests__/e2e-marking-flow.test.ts` | 64 | Full tutor workflow (Phase 1–10): upload, batch, submissions, dispatch to Claude, poll processing, poll completed with result storage, batch results retrieval, tutor mark overrides, report approval, PDF report download |
+| `__tests__/e2e-marking-flow.test.ts` | 77 | Full tutor workflow (Phase 1–12): upload, batch, submissions, dispatch to Claude, poll processing, poll completed with result storage, batch results retrieval, tutor mark overrides, report approval, PDF report download, Phase 11 dashboard, Phase 12 edge cases (double-dispatch, mixed results, file limits) |

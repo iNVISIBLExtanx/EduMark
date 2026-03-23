@@ -8,6 +8,15 @@ vi.mock('@/hooks/useBatchDetail', () => ({
 vi.mock('@/hooks/useSubmissions', () => ({
   useSubmissions: vi.fn(),
 }));
+vi.mock('@/hooks/useBatchPolling', () => ({
+  useBatchPolling: vi.fn(),
+}));
+vi.mock('@/hooks/useSubscription', () => ({
+  useSubscription: vi.fn(),
+}));
+vi.mock('@/lib/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
 vi.mock('@/components/batches/BatchStatusBadge', () => ({
   BatchStatusBadge: ({ status }: { status: string }) => <span data-testid="status-badge">{status}</span>,
 }));
@@ -18,6 +27,12 @@ vi.mock('@/components/batches/SubmissionResultsPanel', () => ({
   SubmissionResultsPanel: ({ submissionId }: { submissionId: string }) => (
     <div data-testid="results-panel">{submissionId}</div>
   ),
+}));
+vi.mock('@/components/batches/BulkUploader', () => ({
+  BulkUploader: ({ batchId }: { batchId: string }) => <div data-testid="bulk-uploader">{batchId}</div>,
+}));
+vi.mock('@/components/billing/UpgradeModal', () => ({
+  UpgradeModal: ({ isOpen }: { isOpen: boolean }) => isOpen ? <div data-testid="upgrade-modal" /> : null,
 }));
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, onClick, ...props }: React.PropsWithChildren<{ onClick?: () => void }>) => (
@@ -30,6 +45,9 @@ vi.mock('lucide-react', () => ({
   Download: () => <span data-testid="icon-download" />,
   Check: () => <span data-testid="icon-check" />,
   Loader2: () => <span data-testid="icon-loader" />,
+  Zap: () => <span data-testid="icon-zap" />,
+  CheckCircle: () => <span data-testid="icon-check-circle" />,
+  XCircle: () => <span data-testid="icon-x-circle" />,
 }));
 vi.mock('@/lib/supabase/client', () => ({
   createBrowserClient: () => ({
@@ -41,9 +59,15 @@ vi.mock('@/lib/supabase/client', () => ({
 
 import { useBatchDetail } from '@/hooks/useBatchDetail';
 import { useSubmissions } from '@/hooks/useSubmissions';
+import { useBatchPolling } from '@/hooks/useBatchPolling';
+import { useSubscription } from '@/hooks/useSubscription';
+import { apiFetch } from '@/lib/api-client';
 
 const mockUseBatchDetail = useBatchDetail as ReturnType<typeof vi.fn>;
 const mockUseSubmissions = useSubmissions as ReturnType<typeof vi.fn>;
+const mockUseBatchPolling = useBatchPolling as ReturnType<typeof vi.fn>;
+const mockUseSubscription = useSubscription as ReturnType<typeof vi.fn>;
+const mockApiFetch = apiFetch as ReturnType<typeof vi.fn>;
 
 const defaultBatch = {
   batch: {
@@ -90,6 +114,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockUseBatchDetail.mockReturnValue(defaultBatch);
   mockUseSubmissions.mockReturnValue(defaultSubmissions);
+  mockUseBatchPolling.mockReturnValue({ results: null, isDone: false, error: null });
+  mockUseSubscription.mockReturnValue({ available: 40, subscription: { plan: 'starter' }, isFree: false, isLoading: false, error: null, usagePercent: 20, isPastDue: false, mutate: vi.fn() });
 });
 
 describe('BatchDetail', () => {
@@ -274,5 +300,125 @@ describe('BatchDetail', () => {
     });
 
     vi.unstubAllGlobals();
+  });
+
+  // --- Dispatch button tests ---
+
+  it('shows "Mark Papers" button when batch is pending and has submissions', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('dispatch-button')).toBeInTheDocument();
+    expect(screen.getByText('Mark Papers')).toBeInTheDocument();
+  });
+
+  it('does not show "Mark Papers" when no submissions', () => {
+    mockUseSubmissions.mockReturnValue({ ...defaultSubmissions, submissions: [] });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mark Papers')).not.toBeInTheDocument();
+  });
+
+  it('does not show "Mark Papers" when status is processing', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'processing' },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mark Papers')).not.toBeInTheDocument();
+  });
+
+  it('shows available AI minutes text near the dispatch button', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByText('40 AI minutes remaining')).toBeInTheDocument();
+  });
+
+  it('calls apiFetch on "Mark Papers" click', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Mark Papers'));
+
+    await vi.waitFor(() => {
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1/dispatch', { method: 'POST' });
+    });
+  });
+
+  it('shows UpgradeModal on 402 insufficient_ai_minutes error', async () => {
+    mockApiFetch.mockRejectedValue(new Error(JSON.stringify({ error: 'insufficient_ai_minutes' })));
+    render(<BatchDetail batchId="b1" />);
+
+    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Mark Papers'));
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('upgrade-modal')).toBeInTheDocument();
+    });
+  });
+
+  it('shows dispatch error on subscription_inactive', async () => {
+    mockApiFetch.mockRejectedValue(new Error(JSON.stringify({ error: 'subscription_inactive' })));
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Mark Papers'));
+
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('dispatch-error')).toBeInTheDocument();
+      expect(screen.getByText('Your subscription is inactive. Please update your payment method.')).toBeInTheDocument();
+    });
+  });
+
+  // --- Processing status tests ---
+
+  it('shows processing status with progress text when batch is processing', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'processing', total_papers: 5, marked_papers: 2 },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('processing-status')).toBeInTheDocument();
+    expect(screen.getByText(/Marking.*papers/)).toBeInTheDocument();
+  });
+
+  it('shows "Marking complete" when batch is completed', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'completed', marked_papers: 3 },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('completed-status')).toBeInTheDocument();
+    expect(screen.getByText('Marking complete')).toBeInTheDocument();
+  });
+
+  it('shows "Marking failed" when batch is failed', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'failed' },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('failed-status')).toBeInTheDocument();
+    expect(screen.getByText('Marking failed')).toBeInTheDocument();
+  });
+
+  // --- BulkUploader integration tests ---
+
+  it('renders BulkUploader when batch is pending', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('bulk-uploader')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-uploader')).toHaveTextContent('b1');
+  });
+
+  it('does not render BulkUploader when batch is completed', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'completed' },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('bulk-uploader')).not.toBeInTheDocument();
+  });
+
+  // --- UpgradeModal tests ---
+
+  it('UpgradeModal is not shown by default', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
   });
 });

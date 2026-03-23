@@ -28,6 +28,13 @@ export async function POST(
     return NextResponse.json({ error: 'Batch not found' }, { status: 404 });
   }
 
+  if (batch.status !== 'pending') {
+    return NextResponse.json(
+      { error: 'batch_already_dispatched', status: batch.status },
+      { status: 400 },
+    );
+  }
+
   if (batch.total_papers === 0) {
     return NextResponse.json({ error: 'Batch has no submissions' }, { status: 400 });
   }
