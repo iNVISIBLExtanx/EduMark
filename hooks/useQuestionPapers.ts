@@ -8,6 +8,7 @@ interface QuestionPaper {
   subject_id: string;
   created_at: string;
   subjects: { name: string; code: string };
+  marking_schemes: { id: string }[];
 }
 
 export function useQuestionPapers() {

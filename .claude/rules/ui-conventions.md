@@ -55,6 +55,33 @@ Use `react-hook-form` + `zod` for all forms. Define zod schemas in `lib/validati
 - Uses `apiUpload` from `lib/api-client.ts` for multipart upload
 - Calls `onUploadComplete` callback after success to trigger SWR revalidation
 
+## Create Batch Pattern
+`CreateBatchDialog.tsx` (opened from `BatchList.tsx` via "Create Batch" button):
+- Batch Name text input (required, 1-200 chars)
+- Question Paper dropdown (all papers from `useQuestionPapers`, scheme_id derived from selection)
+- Medium shown as read-only text (auto-derived from tutor's `marking_language` via `useTutorProfile` — not selectable)
+- On success: navigates to `/batches/{batch.id}` for student paper upload
+
+## Delete Question Paper Pattern
+`QuestionPaperList.tsx` has a Trash2 icon per row:
+- Confirmation dialog before delete ("Delete Question Paper" with warning)
+- `DELETE /api/question-papers/[id]` via `apiFetch`
+- 409 error displayed if paper has associated batches
+- Calls `mutate()` on success to refresh the list
+
+## Batch Detail Navigation
+`BatchDetail.tsx` has a "Back to Batches" button (ArrowLeft icon) at the top that navigates to `/batches`.
+
+## Batch Name Editing
+`BatchDetail.tsx` has a Pencil icon beside the batch name. Clicking it shows an inline input + Save/Cancel buttons. Save calls `PATCH /api/batches/[id]` with the new name. Question paper and medium are displayed but not editable.
+
+## Batch Deletion
+Delete buttons are on each batch card in `BatchList.tsx` (Trash2 icon), not inside `BatchDetail.tsx`.
+- Confirmation dialog before delete ("Delete Batch" with warning about permanent deletion)
+- `DELETE /api/batches/[id]` via `apiFetch`
+- 409 error displayed if batch is processing
+- Calls `mutate()` on success to refresh the list
+
 ## Dispatch & Polling Pattern
 `BatchDetail.tsx` manages the AI marking lifecycle:
 - `pending` + submissions: "Mark Papers" button (calls `apiFetch` POST dispatch)

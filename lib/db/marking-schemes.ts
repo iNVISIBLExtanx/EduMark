@@ -33,6 +33,31 @@ export async function getMarkingSchemeById(schemeId: string) {
   return data;
 }
 
+export async function deleteMarkingSchemeByPaper(paperId: string): Promise<{ id: string; pdf_url: string } | null> {
+  const supabase = await createServerClient();
+
+  // Fetch scheme first to get id + pdf_url for cleanup
+  const { data: scheme, error: fetchError } = await supabase
+    .from('marking_schemes')
+    .select('id, pdf_url')
+    .eq('paper_id', paperId)
+    .single();
+
+  if (fetchError || !scheme) return null;
+
+  // Delete embeddings first (FK constraint)
+  await deleteEmbeddingsByScheme(scheme.id);
+
+  // Delete scheme record
+  const { error: deleteError } = await supabase
+    .from('marking_schemes')
+    .delete()
+    .eq('id', scheme.id);
+  if (deleteError) throw deleteError;
+
+  return scheme;
+}
+
 export async function updateMarkingSchemeStructure(schemeId: string, structureJson: object) {
   const supabase = await createServerClient();
   const { error } = await supabase

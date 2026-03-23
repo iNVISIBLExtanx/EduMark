@@ -177,17 +177,17 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (636 tests, 52 files)
+## Current Test Coverage (681 tests, 55 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
 | `__tests__/lib/stripe/plans.test.ts` | 8 | Plan constants, prices, ordering |
 | `__tests__/lib/billing/gate.test.ts` | 12 | isActive, hasMinutes, getBillingStatus |
 | `__tests__/lib/db/billing.test.ts` | 8 | checkAndDeductMinutes, RPC error, all statuses |
-| `__tests__/lib/db/question-papers.test.ts` | 8 | Question paper CRUD, tutor scoping |
+| `__tests__/lib/db/question-papers.test.ts` | 13 | Question paper CRUD, tutor scoping, getBatchCountByPaper, deleteQuestionPaper |
 | `__tests__/lib/db/marking-schemes.test.ts` | 18 | Create, fetch, update structure, chunking integration |
 | `__tests__/lib/db/submissions.test.ts` | 11 | createStudentAndSubmission, updateBatchPaperCount, getSubmissionById |
-| `__tests__/lib/db/batches.test.ts` | 8 | createBatch, updateBatchStatus, getBatchById |
+| `__tests__/lib/db/batches.test.ts` | 10 | createBatch, updateBatchStatus, getBatchById, updateBatchName |
 | `__tests__/lib/db/marking-results.test.ts` | 10 | getMarkingResultsBySubmission, getMarkingResultsByBatch, saveMarkingResults, updateMarkingOverride |
 | `__tests__/lib/pdf/pdf-to-images.test.ts` | 17 | PDF conversion, page count, warnings, scale |
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
@@ -199,6 +199,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
 | `__tests__/app/api/tutor/subscription/route.test.ts` | 6 | Auth, query shape, response |
 | `__tests__/app/api/question-papers/route.test.ts` | 10 | Auth, file validation, subject check, upload |
+| `__tests__/app/api/question-papers/[id]/route.test.ts` | 7 | Auth, ownership (404), batch guard (409), successful delete, storage cleanup, missing scheme |
 | `__tests__/app/api/marking-schemes/route.test.ts` | 6 | Auth, file validation, paper ownership |
 | `__tests__/app/api/marking-schemes/[id]/embeddings/route.test.ts` | 11 | Auth, chunking, embedding generation, error handling |
 | `__tests__/app/api/batches/route.test.ts` | 8 | Auth, validation, paper/scheme ownership |
@@ -217,11 +218,13 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
 | `__tests__/components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |
 | `__tests__/components/papers/QuestionPaperUploadForm.test.tsx` | 7 | Form render, validation, upload flow |
+| `__tests__/components/papers/QuestionPaperList.test.tsx` | 8 | Table render, delete button, confirm dialog, API call, error states |
+| `__tests__/components/batches/CreateBatchDialog.test.tsx` | 10 | Form fields, paper dropdown, medium default, validation, submit, error, cancel |
 | `__tests__/components/dashboard/DashboardHome.test.tsx` | 20 | Greeting, batches, UpgradeModal, loading/error, quick stats, upgrade threshold |
 | `__tests__/components/settings/SettingsView.test.tsx` | 17 | Profile card, billing card, edit mode, save/cancel, portal |
 | `__tests__/components/batches/BatchStatusBadge.test.tsx` | 7 | All status styles, fallback, base classes |
-| `__tests__/components/batches/BatchList.test.tsx` | 7 | Loading/error/empty states, links, counts, badges |
-| `__tests__/components/batches/BatchDetail.test.tsx` | 31 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration |
+| `__tests__/components/batches/BatchList.test.tsx` | 13 | Loading/error/empty states, links, counts, badges, Create Batch button + dialog, delete batch from card |
+| `__tests__/components/batches/BatchDetail.test.tsx` | 37 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration, back button, edit batch name |
 | `__tests__/components/batches/BulkUploader.test.tsx` | 25 | Drop zone, file validation, upload, drag-and-drop |
 | `__tests__/components/batches/SubmissionResultsPanel.test.tsx` | 8 | Loading, error, results display, MarkingSummary + QuestionFeedbackCard rendering |
 | `__tests__/components/marking/QuestionFeedbackCard.test.tsx` | 13 | Read-only render, edit toggle, save/cancel flow, override display, language fonts, OCR badge, saving state |

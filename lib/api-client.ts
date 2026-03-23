@@ -11,7 +11,12 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
       ...options?.headers,
     },
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try { message = JSON.parse(text).error ?? text; } catch { /* use raw text */ }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -25,6 +30,11 @@ export async function apiUpload<T>(url: string, formData: FormData): Promise<T> 
     },
     body: formData,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try { message = JSON.parse(text).error ?? text; } catch { /* use raw text */ }
+    throw new Error(message);
+  }
   return res.json();
 }

@@ -17,6 +17,13 @@ vi.mock('@/hooks/useSubscription', () => ({
 vi.mock('@/lib/api-client', () => ({
   apiFetch: vi.fn(),
 }));
+const mockPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+vi.mock('@/components/ui/input', () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+}));
 vi.mock('@/components/batches/BatchStatusBadge', () => ({
   BatchStatusBadge: ({ status }: { status: string }) => <span data-testid="status-badge">{status}</span>,
 }));
@@ -48,6 +55,8 @@ vi.mock('lucide-react', () => ({
   Zap: () => <span data-testid="icon-zap" />,
   CheckCircle: () => <span data-testid="icon-check-circle" />,
   XCircle: () => <span data-testid="icon-x-circle" />,
+  ArrowLeft: () => <span data-testid="icon-arrow-left" />,
+  Pencil: () => <span data-testid="icon-pencil" />,
 }));
 vi.mock('@/lib/supabase/client', () => ({
   createBrowserClient: () => ({
@@ -420,5 +429,69 @@ describe('BatchDetail', () => {
   it('UpgradeModal is not shown by default', () => {
     render(<BatchDetail batchId="b1" />);
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+  });
+
+  // --- Back button tests ---
+
+  it('renders Back to Batches button', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByText('Back to Batches')).toBeInTheDocument();
+  });
+
+  it('navigates to /batches on back button click', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Back to Batches'));
+    expect(mockPush).toHaveBeenCalledWith('/batches');
+  });
+
+  // --- Edit batch name tests ---
+
+  it('renders edit batch name button', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByLabelText('Edit batch name')).toBeInTheDocument();
+  });
+
+  it('shows input with current name on edit click', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    const input = screen.getByDisplayValue('Physics 2024 - Class A');
+    expect(input).toBeInTheDocument();
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
+  });
+
+  it('calls PATCH API with new name on save', async () => {
+    mockApiFetch.mockResolvedValue({ updated: true });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    const input = screen.getByDisplayValue('Physics 2024 - Class A');
+    fireEvent.change(input, { target: { value: 'Updated Name' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await vi.waitFor(() => {
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated Name' }),
+      });
+    });
+  });
+
+  it('cancels editing without API call', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    expect(screen.getByDisplayValue('Physics 2024 - Class A')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Physics 2024 - Class A');
+    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call API when name is unchanged', async () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    fireEvent.click(screen.getByText('Save'));
+    // Give any async handlers time to fire
+    await vi.waitFor(() => {
+      expect(mockApiFetch).not.toHaveBeenCalled();
+    });
   });
 });
