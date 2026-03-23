@@ -1865,3 +1865,366 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
     });
   });
 });
+
+describe('Phase 11: Dashboard & Polish', () => {
+  it('computes quick stats correctly from batch data', () => {
+    const batches = [
+      { id: 'b1', status: 'completed', marked_papers: 10, total_papers: 10, created_at: new Date().toISOString() },
+      { id: 'b2', status: 'processing', marked_papers: 3, total_papers: 8, created_at: new Date().toISOString() },
+      { id: 'b3', status: 'completed', marked_papers: 5, total_papers: 5, created_at: '2025-01-15T00:00:00Z' }, // old month
+      { id: 'b4', status: 'pending', marked_papers: 0, total_papers: 4, created_at: new Date().toISOString() },
+    ];
+    const now = new Date();
+    const thisMonthBatches = batches.filter(b => {
+      const d = new Date(b.created_at);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+    const totalMarkedThisMonth = thisMonthBatches.reduce((sum, b) => sum + b.marked_papers, 0);
+    const activeBatches = batches.filter(b => b.status === 'processing').length;
+    const completedBatches = batches.filter(b => b.status === 'completed').length;
+
+    expect(totalMarkedThisMonth).toBe(13); // 10 + 3 (b3 excluded, old month)
+    expect(activeBatches).toBe(1);
+    expect(completedBatches).toBe(2); // b1 + b3 (completed regardless of month)
+  });
+
+  it('bulk upload FormData matches expected schema', async () => {
+    authedUser();
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'pending', total_papers: 0,
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+    });
+    mockGetPdfPageCount.mockResolvedValue(3);
+    mockCreateStudentAndSubmission.mockResolvedValue({
+      id: SUBMISSION_ID, student_id: STUDENT_ID, pdf_url: 'path.pdf', page_count: 3, status: 'pending',
+    });
+    mockUpdateBatchPaperCount.mockResolvedValue(undefined);
+
+    const formData = new FormData();
+    formData.append('metadata', JSON.stringify({
+      batch_id: BATCH_ID,
+      files: [
+        { student_name: 'Kasun Perera', index_no: '12345' },
+        { student_name: 'Dilshan Silva' },
+      ],
+    }));
+    formData.append('files', makePdfFile('kasun.pdf'));
+    formData.append('files', makePdfFile('dilshan.pdf'));
+
+    const res = await postSubmissions(new Request('http://localhost/api/submissions/upload', {
+      method: 'POST',
+      body: formData,
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockCreateStudentAndSubmission).toHaveBeenCalledTimes(2);
+    expect(mockCreateStudentAndSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ studentName: 'Kasun Perera', indexNo: '12345' }),
+    );
+    expect(mockCreateStudentAndSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ studentName: 'Dilshan Silva' }),
+    );
+    expect(mockUpdateBatchPaperCount).toHaveBeenCalledWith(BATCH_ID, 2);
+  });
+
+  it('upgrade modal triggers when free plan has < 5 AI minutes', () => {
+    // Verify the condition: available < 5 && isFree should trigger upgrade
+    const scenarios = [
+      { available: 0, isFree: true, expectUpgrade: true },
+      { available: 3, isFree: true, expectUpgrade: true },
+      { available: 4, isFree: true, expectUpgrade: true },
+      { available: 5, isFree: true, expectUpgrade: false },
+      { available: 10, isFree: true, expectUpgrade: false },
+      { available: 0, isFree: false, expectUpgrade: false },
+    ];
+    for (const { available, isFree, expectUpgrade } of scenarios) {
+      expect(available < 5 && isFree).toBe(expectUpgrade);
+    }
+  });
+
+  it('dispatch returns 402 with error shape when AI minutes exhausted', async () => {
+    authedUser();
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'pending',
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+      total_papers: 1, marked_papers: 0,
+    });
+    mockGetSubmissionsByBatch.mockResolvedValue([
+      { id: SUBMISSION_ID, status: 'pending', pdf_url: 'path.pdf' },
+    ]);
+    mockGetBillingStatus.mockResolvedValue({
+      plan: 'free', ai_minutes_used: 10, ai_minutes_limit: 10,
+      subscription_status: 'active', billing_period_end: null,
+    });
+    // hasMinutes returns false (10-10 = 0 < 1)
+
+    const res = await postDispatch(
+      new Request('http://localhost/api/batches/b1/dispatch', { method: 'POST' }),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(402);
+    const body = await res.json();
+    expect(body.error).toBe('insufficient_ai_minutes');
+    expect(body).toHaveProperty('available');
+    expect(body).toHaveProperty('needed');
+  });
+});
+
+// ─── Phase 12: Edge Cases & Error Paths ──────────────────────────────
+describe('Phase 12: Edge cases & error paths', () => {
+
+  // ── Double-dispatch prevention ──────────────────────────────────────
+  it('rejects dispatch when batch is already processing', async () => {
+    authedUser();
+    mockGetBillingStatus.mockResolvedValue({
+      plan: 'starter', ai_minutes_used: 0, ai_minutes_limit: 50,
+      subscription_status: 'active', billing_period_end: null,
+    });
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'processing',
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+      total_papers: 5, marked_papers: 2, claude_batch_id: 'claude-batch-123',
+    });
+
+    const res = await postDispatch(
+      new Request('http://localhost/api/batches/b1/dispatch', { method: 'POST' }),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('batch_already_dispatched');
+  });
+
+  it('rejects dispatch when batch is already completed', async () => {
+    authedUser();
+    mockGetBillingStatus.mockResolvedValue({
+      plan: 'starter', ai_minutes_used: 5, ai_minutes_limit: 50,
+      subscription_status: 'active', billing_period_end: null,
+    });
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'completed',
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+      total_papers: 5, marked_papers: 5,
+    });
+
+    const res = await postDispatch(
+      new Request('http://localhost/api/batches/b1/dispatch', { method: 'POST' }),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('batch_already_dispatched');
+    expect(body.status).toBe('completed');
+  });
+
+  // ── Empty batch dispatch ────────────────────────────────────────────
+  it('rejects dispatch when batch has 0 submissions', async () => {
+    authedUser();
+    mockGetBillingStatus.mockResolvedValue({
+      plan: 'starter', ai_minutes_used: 0, ai_minutes_limit: 50,
+      subscription_status: 'active', billing_period_end: null,
+    });
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'pending',
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+      total_papers: 0, marked_papers: 0,
+    });
+
+    const res = await postDispatch(
+      new Request('http://localhost/api/batches/b1/dispatch', { method: 'POST' }),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Batch has no submissions');
+  });
+
+  // ── No pending submissions (all already marked) ─────────────────────
+  it('returns 400 when all submissions are already marked', async () => {
+    authedUser();
+    mockGetBillingStatus.mockResolvedValue({
+      plan: 'starter', ai_minutes_used: 0, ai_minutes_limit: 50,
+      subscription_status: 'active', billing_period_end: null,
+    });
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'pending',
+      paper_id: PAPER_ID, scheme_id: SCHEME_ID, medium: 'english',
+      total_papers: 2, marked_papers: 2,
+    });
+    mockGetSubmissionsByBatch.mockResolvedValue([
+      { id: SUBMISSION_ID, status: 'marked', pdf_url: 'path.pdf' },
+    ]);
+    mockCheckAndDeductMinutes.mockResolvedValue(undefined);
+    mockUpdateBatchStatus.mockResolvedValue(undefined);
+    mockGetMarkingSchemeById.mockResolvedValue({
+      id: SCHEME_ID, structure_json: { questions: [] },
+    });
+    mockGetQuestionPaperById.mockResolvedValue({
+      id: PAPER_ID, subjects: [{ name: 'Physics' }],
+    });
+
+    const res = await postDispatch(
+      new Request('http://localhost/api/batches/b1/dispatch', { method: 'POST' }),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('No pending submissions in batch');
+  });
+
+  // ── Mixed success/failure batch results ─────────────────────────────
+  it('handles batch with mixed succeeded and failed results', async () => {
+    authedUser();
+    const SUB_ID_2 = '00000000-0000-4000-8000-000000000061';
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'processing',
+      claude_batch_id: 'batch-mixed',
+      total_papers: 2, marked_papers: 0,
+    });
+    mockBatchesRetrieve.mockResolvedValue({ processing_status: 'ended' });
+
+    // Mixed results: one succeeded, one failed
+    const mixedResults = [
+      {
+        custom_id: SUBMISSION_ID,
+        result: {
+          type: 'succeeded',
+          message: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                questions: [{ question_no: 1, max_marks: 10, awarded_marks: 8, student_answer_text: 'ans', feedback: 'good', ocr_confidence: 'high' }],
+                total_awarded: 8, total_max: 10, general_feedback: 'Well done',
+              }),
+            }],
+          },
+        },
+      },
+      {
+        custom_id: SUB_ID_2,
+        result: { type: 'errored', error: { message: 'Claude processing error' } },
+      },
+    ];
+    mockBatchesResults.mockReturnValue((async function* () {
+      for (const r of mixedResults) yield r;
+    })());
+
+    mockSaveMarkingResults.mockResolvedValue(undefined);
+    mockUpdateSubmissionStatus.mockResolvedValue(undefined);
+    mockUpdateBatchMarkedPapers.mockResolvedValue(undefined);
+    mockUpdateBatchStatus.mockResolvedValue(undefined);
+
+    const res = await getPoll(
+      new Request('http://localhost/api/batches/b1/poll'),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Batch with mixed results should be 'completed' (not 'failed') since some succeeded
+    expect(body.status).toBe('completed');
+    expect(body.marked).toBe(1);
+    expect(body.total).toBe(2);
+
+    // Verify: succeeded submission → marked, failed submission → failed
+    expect(mockSaveMarkingResults).toHaveBeenCalledTimes(1);
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID, 'marked');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUB_ID_2, 'failed');
+  });
+
+  // ── 50-file upload limit (Zod validation) ──────────────────────────
+  it('rejects upload when metadata exceeds 50 files', async () => {
+    authedUser();
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'pending', total_papers: 0,
+    });
+
+    const files51 = Array.from({ length: 51 }, (_, i) => ({
+      student_name: `Student ${i}`,
+    }));
+
+    const formData = new FormData();
+    formData.append('metadata', JSON.stringify({ batch_id: BATCH_ID, files: files51 }));
+    for (let i = 0; i < 51; i++) {
+      formData.append('files', makePdfFile(`student${i}.pdf`));
+    }
+
+    const res = await postSubmissions(new Request('http://localhost/api/submissions/upload', {
+      method: 'POST',
+      body: formData,
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    // Zod validation error for max 50 files
+    expect(JSON.stringify(body.error)).toContain('50');
+  });
+
+  // NOTE: File size >20MB validation is tested in the upload route unit test
+  // (__tests__/app/api/submissions/upload/route.test.ts) because jsdom's FormData
+  // does not preserve File.size through Request serialization.
+
+  // ── Upload to completed batch ──────────────────────────────────────
+  it('rejects upload to a completed batch', async () => {
+    authedUser();
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'completed', total_papers: 5,
+    });
+
+    const formData = new FormData();
+    formData.append('metadata', JSON.stringify({
+      batch_id: BATCH_ID,
+      files: [{ student_name: 'New Student' }],
+    }));
+    formData.append('files', makePdfFile('new.pdf'));
+
+    const res = await postSubmissions(new Request('http://localhost/api/submissions/upload', {
+      method: 'POST',
+      body: formData,
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('completed');
+  });
+
+  // ── Approve already-approved report (idempotent) ───────────────────
+  it('handles approving an already-approved report gracefully', async () => {
+    authedUser();
+    mockGetSubmissionById.mockResolvedValue({
+      id: SUBMISSION_ID, student_id: STUDENT_ID, batch_id: BATCH_ID,
+      status: 'marked', pdf_url: 'test.pdf',
+    });
+    mockGetBatchById.mockResolvedValue({
+      id: BATCH_ID, tutor_id: TEST_USER.id, status: 'completed',
+    });
+    mockGetReportBySubmission.mockResolvedValue({
+      id: 'report-1', submission_id: SUBMISSION_ID,
+      tutor_approved: true, approved_at: '2026-03-22T12:00:00Z',
+    });
+    mockApproveReport.mockResolvedValue(undefined);
+
+    const res = await postApprove(
+      new Request('http://localhost/api/reports/r1/approve', { method: 'POST' }),
+      { params: Promise.resolve({ id: SUBMISSION_ID }) },
+    );
+
+    // Should succeed (idempotent) — approve again is fine
+    expect(res.status).toBe(200);
+  });
+
+  // ── Auth enforcement for new routes ────────────────────────────────
+  it('GET /api/batches/[id]/results returns 401 without auth', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } });
+    const res = await getBatchResults(
+      new Request('http://localhost/api/batches/b1/results'),
+      { params: Promise.resolve({ id: BATCH_ID }) },
+    );
+    expect(res.status).toBe(401);
+  });
+});

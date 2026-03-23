@@ -19,7 +19,7 @@ export function DashboardHome() {
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   useEffect(() => {
-    if (available === 0 && isFree) {
+    if (available < 5 && isFree) {
       setShowUpgrade(true);
     }
   }, [available, isFree]);
@@ -36,6 +36,15 @@ export function DashboardHome() {
     );
   }
 
+  const now = new Date();
+  const thisMonthBatches = batches.filter((b) => {
+    const d = new Date(b.created_at);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const totalMarkedThisMonth = thisMonthBatches.reduce((sum, b) => sum + b.marked_papers, 0);
+  const activeBatches = batches.filter((b) => b.status === 'processing').length;
+  const completedBatches = batches.filter((b) => b.status === 'completed').length;
+
   const recentBatches = batches.slice(0, 5);
 
   return (
@@ -51,6 +60,34 @@ export function DashboardHome() {
       </div>
 
       <AiMinutesBar />
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="quick-stats">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Papers Marked This Month</p>
+            <p className="text-2xl font-bold" data-testid="stat-marked-month">
+              {totalMarkedThisMonth}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Active Batches</p>
+            <p className="text-2xl font-bold" data-testid="stat-active-batches">
+              {activeBatches}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Completed Batches</p>
+            <p className="text-2xl font-bold" data-testid="stat-completed-batches">
+              {completedBatches}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>

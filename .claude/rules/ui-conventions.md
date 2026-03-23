@@ -46,3 +46,19 @@ if (error) return <ErrorMessage message={error.message} />;
 
 ## Form Handling
 Use `react-hook-form` + `zod` for all forms. Define zod schemas in `lib/validations/`.
+
+## Bulk Upload Pattern
+`BulkUploader.tsx` provides drag-and-drop file upload:
+- Drop zone with visual feedback (blue highlight on drag-over)
+- Client-side validation: PDF type, 20MB size limit, 50 file maximum
+- File list with editable student name (auto-populated from filename) + optional index number
+- Uses `apiUpload` from `lib/api-client.ts` for multipart upload
+- Calls `onUploadComplete` callback after success to trigger SWR revalidation
+
+## Dispatch & Polling Pattern
+`BatchDetail.tsx` manages the AI marking lifecycle:
+- `pending` + submissions: "Mark Papers" button (calls `apiFetch` POST dispatch)
+- `processing`: Animated progress text with `useBatchPolling` (15s refresh)
+- `completed`: Green checkmark status
+- `failed`: Red error status
+- 402 errors: `UpgradeModal` for insufficient minutes

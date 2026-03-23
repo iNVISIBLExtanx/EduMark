@@ -173,4 +173,60 @@ describe('DashboardHome', () => {
     render(<DashboardHome />);
     expect(screen.getByTestId('ai-minutes-bar')).toBeInTheDocument();
   });
+
+  it('shows quick stats card', () => {
+    render(<DashboardHome />);
+    expect(screen.getByTestId('quick-stats')).toBeInTheDocument();
+  });
+
+  it('shows total papers marked this month', () => {
+    render(<DashboardHome />);
+    // Batch 1: 10 marked, Batch 2: 2 marked, Batch 3: 0 marked = 12 total
+    // All batches have March 2026 dates, matching the current test date
+    expect(screen.getByTestId('stat-marked-month')).toHaveTextContent('12');
+  });
+
+  it('shows active batches count', () => {
+    render(<DashboardHome />);
+    // Batch 2 has status 'processing' = 1 active
+    expect(screen.getByTestId('stat-active-batches')).toHaveTextContent('1');
+  });
+
+  it('shows completed batches count', () => {
+    render(<DashboardHome />);
+    // Batch 1 has status 'completed' = 1 completed
+    expect(screen.getByTestId('stat-completed-batches')).toHaveTextContent('1');
+  });
+
+  it('shows 0 for stats when no batches in current month', () => {
+    const oldBatches = [
+      { id: 'b1', name: 'Old Batch 1', status: 'completed', medium: 'english', total_papers: 10, marked_papers: 10, created_at: '2025-01-15' },
+      { id: 'b2', name: 'Old Batch 2', status: 'processing', medium: 'sinhala', total_papers: 5, marked_papers: 3, created_at: '2025-01-16' },
+    ];
+    mockUseBatches.mockReturnValue({ ...defaultBatches, batches: oldBatches });
+    render(<DashboardHome />);
+    expect(screen.getByTestId('stat-marked-month')).toHaveTextContent('0');
+  });
+
+  it('shows UpgradeModal when available < 5 and isFree', () => {
+    mockUseSubscription.mockReturnValue({
+      ...defaultSubscription,
+      available: 3,
+      isFree: true,
+      subscription: { plan: 'free' },
+    });
+    render(<DashboardHome />);
+    expect(screen.getByTestId('upgrade-modal')).toBeInTheDocument();
+  });
+
+  it('does NOT show UpgradeModal when available >= 5 and isFree', () => {
+    mockUseSubscription.mockReturnValue({
+      ...defaultSubscription,
+      available: 5,
+      isFree: true,
+      subscription: { plan: 'free' },
+    });
+    render(<DashboardHome />);
+    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+  });
 });

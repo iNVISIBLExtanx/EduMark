@@ -154,7 +154,7 @@ export function AiMinutesBar() {
 
 ## Free Plan Behaviour
 - `ai_minutes_limit = 10`, same enforcement as paid plans
-- When free tutor hits limit, show upgrade modal with pricing table
+- When free tutor has < 5 AI minutes remaining, show upgrade modal with pricing table
 - Upgrade calls `POST /api/stripe/checkout` with selected priceId
 
 ## Folder Additions to architecture.md

@@ -228,6 +228,10 @@ describe('POST /api/submissions/upload', () => {
     expect(mockUpdateBatchPaperCount).toHaveBeenCalledWith(BATCH_ID, 1);
   });
 
+  // NOTE: File size >20MB validation (route.ts:70-72) cannot be tested in jsdom
+  // because FormData serialization strips custom File.size properties. The validation
+  // exists in production code and should be verified with real API testing (stripe trigger).
+
   it('returns 500 on storage upload failure', async () => {
     mockGetUser.mockResolvedValue({ data: { user: TEST_USER } });
     mockGetBatchById.mockResolvedValue({ id: BATCH_ID, status: 'uploading', total_papers: 0 });

@@ -1,14 +1,19 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useBatchDetail } from '@/hooks/useBatchDetail';
 import { useSubmissions } from '@/hooks/useSubmissions';
+import { useBatchPolling } from '@/hooks/useBatchPolling';
+import { useSubscription } from '@/hooks/useSubscription';
 import { BatchStatusBadge } from './BatchStatusBadge';
 import { LanguageBadge } from '@/components/shared/LanguageBadge';
 import { SubmissionResultsPanel } from './SubmissionResultsPanel';
+import { BulkUploader } from './BulkUploader';
+import { UpgradeModal } from '@/components/billing/UpgradeModal';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, Check, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Check, Loader2, Zap, CheckCircle, XCircle } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api-client';
 import {
   Table,
   TableBody,
@@ -19,10 +24,26 @@ import {
 } from '@/components/ui/table';
 
 export function BatchDetail({ batchId }: { batchId: string }) {
-  const { batch, isLoading, error } = useBatchDetail(batchId);
-  const { submissions, isLoading: submissionsLoading } = useSubmissions(batchId);
+  const { batch, isLoading, error, mutate } = useBatchDetail(batchId);
+  const { submissions, isLoading: submissionsLoading, mutate: submissionsMutate } = useSubmissions(batchId);
+  const { available } = useSubscription();
   const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+  const { results: pollData, isDone } = useBatchPolling(
+    batchId,
+    batch?.status === 'processing'
+  );
+
+  useEffect(() => {
+    if (isDone) {
+      mutate();
+      submissionsMutate();
+    }
+  }, [isDone, mutate, submissionsMutate]);
 
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;
@@ -38,12 +59,36 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     return { Authorization: `Bearer ${session?.access_token ?? ''}` };
   };
 
+  const handleDispatch = async () => {
+    setDispatchError(null);
+    setDispatching(true);
+    try {
+      await apiFetch(`/api/batches/${batchId}/dispatch`, { method: 'POST' });
+      await mutate();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Dispatch failed';
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed.error === 'insufficient_ai_minutes') {
+          setShowUpgradeModal(true);
+        } else if (parsed.error === 'subscription_inactive') {
+          setDispatchError('Your subscription is inactive. Please update your payment method.');
+        } else {
+          setDispatchError(parsed.error ?? 'Dispatch failed');
+        }
+      } catch {
+        setDispatchError(message);
+      }
+    } finally {
+      setDispatching(false);
+    }
+  };
+
   const handleApproveAndDownload = async (submissionId: string) => {
     setDownloadingId(submissionId);
     try {
       const headers = await getAuthHeaders();
 
-      // Approve first
       const approveRes = await fetch(`/api/reports/${submissionId}/approve`, {
         method: 'POST',
         headers,
@@ -53,7 +98,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         throw new Error(err.error ?? 'Failed to approve report');
       }
 
-      // Then download
       await triggerDownload(submissionId, headers);
     } catch (err) {
       console.error('Approve & download error:', err);
@@ -102,7 +146,68 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         </div>
       </div>
 
-      {/* TODO Phase 8: Add "Dispatch to AI" button — POST /api/batches/[id]/dispatch */}
+      {/* Dispatch / Status Section */}
+      {batch.status === 'pending' && submissions.length > 0 && (
+        <div className="space-y-2">
+          <Button
+            onClick={handleDispatch}
+            disabled={dispatching}
+            data-testid="dispatch-button"
+          >
+            {dispatching ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Dispatching...
+              </>
+            ) : (
+              <>
+                <Zap className="h-4 w-4 mr-2" />
+                Mark Papers
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-gray-500">{available} AI minutes remaining</p>
+          {dispatchError && (
+            <p className="text-sm text-red-600" data-testid="dispatch-error">
+              {dispatchError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {batch.status === 'processing' && (
+        <div className="flex items-center gap-2 text-blue-600" data-testid="processing-status">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm font-medium">
+            Marking {pollData?.results?.length ?? batch.marked_papers}/{batch.total_papers} papers...
+          </span>
+        </div>
+      )}
+
+      {batch.status === 'completed' && (
+        <div className="flex items-center gap-2 text-green-600" data-testid="completed-status">
+          <CheckCircle className="h-5 w-5" />
+          <span className="text-sm font-medium">Marking complete</span>
+        </div>
+      )}
+
+      {batch.status === 'failed' && (
+        <div className="flex items-center gap-2 text-red-600" data-testid="failed-status">
+          <XCircle className="h-5 w-5" />
+          <span className="text-sm font-medium">Marking failed</span>
+        </div>
+      )}
+
+      {/* Bulk Uploader — visible when batch is pending */}
+      {batch.status === 'pending' && (
+        <BulkUploader
+          batchId={batchId}
+          onUploadComplete={() => {
+            submissionsMutate();
+            mutate();
+          }}
+        />
+      )}
 
       <div>
         <h2 className="text-lg font-semibold mb-3">
@@ -200,6 +305,8 @@ export function BatchDetail({ batchId }: { batchId: string }) {
           </Table>
         )}
       </div>
+
+      <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </div>
   );
 }

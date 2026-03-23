@@ -79,6 +79,7 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── BatchList.tsx
 │   │   ├── BatchDetail.tsx
 │   │   ├── BatchStatusBadge.tsx
+│   │   ├── BulkUploader.tsx
 │   │   └── SubmissionResultsPanel.tsx
 │   ├── marking/
 │   │   ├── MarkingSummary.tsx
