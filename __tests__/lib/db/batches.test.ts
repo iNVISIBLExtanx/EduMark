@@ -5,6 +5,7 @@ import {
   getBatchById,
   createBatch,
   updateBatchStatus,
+  updateBatchName,
 } from '@/lib/db/batches';
 
 beforeEach(() => {
@@ -105,5 +106,28 @@ describe('updateBatchStatus', () => {
     mockSupabaseClient.eq.mockResolvedValue({ error: { message: 'update failed' } });
 
     await expect(updateBatchStatus('b1', 'failed')).rejects.toEqual({ message: 'update failed' });
+  });
+});
+
+describe('updateBatchName', () => {
+  it('updates name for the given batch and tutor', async () => {
+    mockSupabaseClient.eq
+      .mockReturnValueOnce(mockSupabaseClient) // .eq('id', ...)
+      .mockResolvedValueOnce({ error: null }); // .eq('tutor_id', ...)
+
+    await updateBatchName('b1', 'tutor-1', 'New Name');
+
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('batches');
+    expect(mockSupabaseClient.update).toHaveBeenCalledWith({ name: 'New Name' });
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'b1');
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('tutor_id', 'tutor-1');
+  });
+
+  it('throws on update error', async () => {
+    mockSupabaseClient.eq
+      .mockReturnValueOnce(mockSupabaseClient)
+      .mockResolvedValueOnce({ error: { message: 'update failed' } });
+
+    await expect(updateBatchName('b1', 'tutor-1', 'New Name')).rejects.toEqual({ message: 'update failed' });
   });
 });

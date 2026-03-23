@@ -7,8 +7,21 @@ The marking scheme is **required** when uploading a question paper — Claude ca
 `POST /api/question-papers` uploads the paper PDF, then `POST /api/marking-schemes` uploads the scheme PDF linked to the paper.
 Both are uploaded in a single form submission in `QuestionPaperUploadForm.tsx`.
 
+### Step 0.5: Delete Question Paper + Marking Scheme (optional)
+`DELETE /api/question-papers/[id]` → deletes paper, its marking scheme, embeddings, and storage files.
+- Blocked (409) if paper has associated batches — delete batches first.
+- Cascade: deletes embeddings (`deleteEmbeddingsByScheme`), then scheme record (`deleteMarkingSchemeByPaper`), then storage files, then paper record.
+- UI: Trash icon in `QuestionPaperList.tsx` with confirmation dialog.
+
 ### Step 1: Create Batch
 `POST /api/batches` → creates batch record with status `pending`, links to paper + scheme
+
+UI: "Create Batch" button in `BatchList.tsx` opens `CreateBatchDialog.tsx` with:
+- Batch Name (text input)
+- Question Paper (dropdown from `useQuestionPapers`, all papers have schemes since both are uploaded together)
+- Medium (read-only, auto-derived from tutor's `marking_language` — not selectable)
+- `scheme_id` is derived from the selected paper's `marking_schemes[0].id`
+- On success: navigates to `/batches/{batch.id}`
 
 ### Step 2: Process Marking Scheme (embeddings)
 `POST /api/marking-schemes/[id]/embeddings` → chunks scheme + generates OpenAI embeddings → stored in `ms_embeddings`
@@ -91,6 +104,17 @@ Tutor approves via `POST /api/reports/[submissionId]/approve`, then downloads vi
 Batch:      pending → uploading → processing → completed | failed
 Submission: pending → processing → marked | failed
 ```
+
+## Batch Name Editing
+`PATCH /api/batches/[id]` → updates batch name (tutor-scoped ownership check).
+- Validates name is non-empty string, max 200 chars.
+- UI: Pencil icon beside batch name in `BatchDetail.tsx`. Inline input + Save/Cancel. Question paper and medium are read-only.
+
+## Batch Deletion
+`DELETE /api/batches/[id]` → deletes batch, its submissions (storage + DB), and all marking results.
+- Blocked (409) if batch status is `processing` — wait for completion or failure first.
+- Cascade: collects submission PDF URLs, removes from `submissions/` storage bucket, then deletes batch record (FK cascades handle students → submissions → marking_results).
+- UI: Trash icon on each batch card in `BatchList.tsx` with confirmation dialog. On success, calls `mutate()` to refresh the list.
 
 ## Error Handling
 - If any submission fails in Batch API, mark that submission `failed`, continue others

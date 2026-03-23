@@ -173,7 +173,7 @@ export function QuestionPaperUploadForm() {
           )}
           {success && (
             <p className="text-sm text-green-600">
-              Question paper uploaded successfully!
+              Question paper and marking scheme uploaded successfully!
             </p>
           )}
 

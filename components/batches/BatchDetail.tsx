@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useBatchDetail } from '@/hooks/useBatchDetail';
 import { useSubmissions } from '@/hooks/useSubmissions';
 import { useBatchPolling } from '@/hooks/useBatchPolling';
@@ -11,7 +12,8 @@ import { SubmissionResultsPanel } from './SubmissionResultsPanel';
 import { BulkUploader } from './BulkUploader';
 import { UpgradeModal } from '@/components/billing/UpgradeModal';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, Check, Loader2, Zap, CheckCircle, XCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { ArrowLeft, ChevronDown, ChevronRight, Download, Check, Loader2, Zap, CheckCircle, XCircle, Pencil } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api-client';
 import {
@@ -24,6 +26,7 @@ import {
 } from '@/components/ui/table';
 
 export function BatchDetail({ batchId }: { batchId: string }) {
+  const router = useRouter();
   const { batch, isLoading, error, mutate } = useBatchDetail(batchId);
   const { submissions, isLoading: submissionsLoading, mutate: submissionsMutate } = useSubmissions(batchId);
   const { available } = useSubscription();
@@ -32,6 +35,9 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   const { results: pollData, isDone } = useBatchPolling(
     batchId,
@@ -118,6 +124,27 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     }
   };
 
+  const handleSaveName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === batch?.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      await apiFetch(`/api/batches/${batchId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      await mutate();
+      setEditingName(false);
+    } catch {
+      // keep editing on error
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const triggerDownload = async (submissionId: string, headers: Record<string, string>) => {
     const res = await fetch(`/api/reports/${submissionId}/download`, { headers });
     if (!res.ok) {
@@ -135,8 +162,53 @@ export function BatchDetail({ batchId }: { batchId: string }) {
 
   return (
     <div className="p-6 space-y-6">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push('/batches')}
+        className="mb-2"
+      >
+        <ArrowLeft className="h-4 w-4 mr-1" />
+        Back to Batches
+      </Button>
+
       <div>
-        <h1 className="text-2xl font-bold">{batch.name}</h1>
+        <div className="flex items-center gap-2">
+          {editingName ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                maxLength={200}
+                className="text-2xl font-bold h-auto py-1"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveName();
+                  if (e.key === 'Escape') setEditingName(false);
+                }}
+                disabled={savingName}
+              />
+              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
+                {savingName ? 'Saving...' : 'Save'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditingName(false)} disabled={savingName}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold">{batch.name}</h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setNameValue(batch.name); setEditingName(true); }}
+                aria-label="Edit batch name"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-3 mt-2">
           <BatchStatusBadge status={batch.status} />
           <LanguageBadge language={batch.medium} />

@@ -299,6 +299,28 @@ Rules:
 
 ## Query Functions Reference
 
+### `lib/db/question-papers.ts`
+| Function | Description |
+|----------|-------------|
+| `getQuestionPapersByTutor(tutorId)` | List papers with nested subject + marking_schemes(id) |
+| `getQuestionPaperById(paperId, tutorId)` | Get single paper (ownership check via tutor_id) |
+| `createQuestionPaper(input)` | Insert question paper record |
+| `getBatchCountByPaper(paperId)` | Count batches referencing this paper (used to guard deletion) |
+| `deleteQuestionPaper(paperId, tutorId)` | Delete question paper record (tutor-scoped) |
+
+### `lib/db/marking-schemes.ts`
+| Function | Description |
+|----------|-------------|
+| `getMarkingSchemeByPaper(paperId)` | Get scheme linked to a paper |
+| `createMarkingScheme(input)` | Create scheme record |
+| `getMarkingSchemeById(schemeId)` | Fetch scheme with structure_json |
+| `updateMarkingSchemeStructure(schemeId, structureJson)` | Update parsed structure |
+| `deleteMarkingSchemeByPaper(paperId)` | Delete scheme + its embeddings for a paper, returns `{ id, pdf_url } | null` |
+| `insertEmbeddingChunks(chunks)` | Bulk insert embedding vectors |
+| `deleteEmbeddingsByScheme(schemeId)` | Delete all embeddings for a scheme |
+| `markEmbeddingsDone(schemeId)` | Set embeddings_done flag |
+| `matchMarkingCriteria(schemeId, queryEmbedding, matchCount)` | RAG retrieval via cosine distance |
+
 ### `lib/db/batches.ts`
 | Function | Description |
 |----------|-------------|
@@ -307,7 +329,9 @@ Rules:
 | `createBatch(input)` | Create batch with paper, scheme, medium |
 | `updateBatchStatus(batchId, status)` | Update batch status (pending/processing/completed/failed) |
 | `updateBatchClaudeBatchId(batchId, claudeBatchId)` | Save Anthropic Batch API job ID |
+| `updateBatchName(batchId, tutorId, name)` | Update batch name (tutor-scoped ownership check) |
 | `updateBatchMarkedPapers(batchId, markedPapers)` | Update marked paper count |
+| `deleteBatch(batchId, tutorId)` | Delete batch record (tutor-scoped, cascades to students/submissions/results via FK) |
 
 ### `lib/db/submissions.ts`
 | Function | Description |

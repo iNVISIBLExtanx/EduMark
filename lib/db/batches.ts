@@ -64,6 +64,26 @@ export async function updateBatchClaudeBatchId(batchId: string, claudeBatchId: s
   if (error) throw error;
 }
 
+export async function deleteBatch(batchId: string, tutorId: string) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .delete()
+    .eq('id', batchId)
+    .eq('tutor_id', tutorId);
+  if (error) throw error;
+}
+
+export async function updateBatchName(batchId: string, tutorId: string, name: string) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .update({ name })
+    .eq('id', batchId)
+    .eq('tutor_id', tutorId);
+  if (error) throw error;
+}
+
 export async function updateBatchMarkedPapers(batchId: string, markedPapers: number) {
   const supabase = await createServerClient();
   const { error } = await supabase
