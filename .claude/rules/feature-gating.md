@@ -76,7 +76,10 @@ interface SubscriptionData {
 export function useSubscription() {
   const { data, error, isLoading, mutate } = useSWR<SubscriptionData>('/api/tutor/subscription');
   const available = data ? data.ai_minutes_limit - data.ai_minutes_used : 0;
-  const usagePercent = data ? (data.ai_minutes_used / data.ai_minutes_limit) * 100 : 0;
+  // Guard against division by zero when ai_minutes_limit is 0 (returns 0 instead of NaN)
+  const usagePercent = data && data.ai_minutes_limit > 0
+    ? (data.ai_minutes_used / data.ai_minutes_limit) * 100
+    : 0;
   const isPastDue = data?.subscription_status === 'past_due';
   const isFree = data?.plan === 'free';
   return { subscription: data, available, usagePercent, isPastDue, isFree, isLoading, error, mutate };
@@ -151,7 +154,7 @@ export function AiMinutesBar() {
 
 ## Free Plan Behaviour
 - `ai_minutes_limit = 10`, same enforcement as paid plans
-- When free tutor hits limit, show upgrade modal with pricing table
+- When free tutor has < 5 AI minutes remaining, show upgrade modal with pricing table
 - Upgrade calls `POST /api/stripe/checkout` with selected priceId
 
 ## Folder Additions to architecture.md

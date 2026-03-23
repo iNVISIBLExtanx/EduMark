@@ -9,7 +9,14 @@ Claude Code must follow this structure and create new files in the correct place
 - **hooks/**         — Client-side data fetching & state hooks (SWR)
 - **lib/**           — Domain logic, integrations, and typed data access
 - **supabase/**      — SQL migrations, seed data, and generated types
+- **__mocks__/**     — Shared test mocks (Supabase, Stripe, Anthropic)
 - **.claude/rules/** — Instruction files for Claude Code (this folder)
+
+## Testing
+- Tests live in `__tests__/` at the project root, mirroring the source tree: `lib/billing/gate.ts` → `__tests__/lib/billing/gate.test.ts`
+- Cross-cutting/E2E tests go directly in `__tests__/` root: `__tests__/e2e-marking-flow.test.ts`
+- Shared mocks in `__mocks__/` (supabase, stripe, anthropic)
+- See `.claude/rules/testing.md` for full testing strategy
 
 ## Folder Tree
 
@@ -18,10 +25,14 @@ Claude Code must follow this structure and create new files in the correct place
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/page.tsx
-│   │   └── callback/page.tsx
+│   │   ├── callback/page.tsx
+│   │   └── onboarding/page.tsx
 │   ├── (dashboard)/
 │   │   ├── dashboard/page.tsx
 │   │   ├── pricing/page.tsx
+│   │   ├── papers/
+│   │   │   ├── page.tsx              # question papers dashboard
+│   │   │   └── QuestionPapersView.tsx
 │   │   ├── batches/page.tsx
 │   │   ├── batches/[id]/page.tsx
 │   │   └── settings/page.tsx
@@ -29,16 +40,31 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── auth/
 │       │   └── callback/route.ts
 │       ├── tutor/
+│       │   ├── profile/route.ts      # GET/POST tutor profile + registration
+│       │   ├── subjects/route.ts     # GET tutor's registered subjects
 │       │   └── subscription/route.ts
 │       ├── batches/
 │       │   ├── route.ts          # create/list batches
 │       │   └── [id]/
 │       │       ├── route.ts      # get/update single batch
-│       │       └── dispatch/route.ts  # trigger AI marking
+│       │       ├── submissions/route.ts  # GET submissions for batch
+│       │       ├── dispatch/route.ts  # POST trigger AI marking
+│       │       ├── poll/route.ts      # GET poll Claude Batch API results
+│       │       └── results/route.ts   # GET all marking results for batch
+│       ├── question-papers/
+│       │   └── route.ts          # GET/POST question papers
+│       ├── marking-schemes/
+│       │   └── route.ts          # POST marking schemes
+│       ├── subjects/
+│       │   └── route.ts          # list all subjects
 │       ├── submissions/
-│       │   └── upload/route.ts   # PDF upload endpoint
+│       │   ├── upload/route.ts   # bulk PDF upload endpoint
+│       │   └── [id]/
+│       │       └── override/route.ts  # PATCH tutor mark overrides
 │       ├── reports/
-│       │   └── [id]/download/route.ts # PDF report download
+│       │   └── [id]/
+│       │       ├── download/route.ts # PDF report download
+│       │       └── approve/route.ts  # POST tutor approves report
 │       └── stripe/
 │           ├── checkout/route.ts
 │           ├── portal/route.ts
@@ -52,14 +78,25 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── batches/
 │   │   ├── BatchList.tsx
 │   │   ├── BatchDetail.tsx
-│   │   └── BatchStatusBadge.tsx
+│   │   ├── BatchStatusBadge.tsx
+│   │   ├── BulkUploader.tsx
+│   │   └── SubmissionResultsPanel.tsx
 │   ├── marking/
 │   │   ├── MarkingSummary.tsx
 │   │   └── QuestionFeedbackCard.tsx
+│   ├── papers/
+│   │   ├── QuestionPaperUploadForm.tsx
+│   │   └── QuestionPaperList.tsx
 │   ├── billing/
 │   │   ├── AiMinutesBar.tsx
+│   │   ├── PastDueBanner.tsx
+│   │   ├── PlanBadge.tsx
 │   │   ├── PricingTable.tsx
 │   │   └── UpgradeModal.tsx
+│   ├── dashboard/
+│   │   └── DashboardHome.tsx
+│   ├── settings/
+│   │   └── SettingsView.tsx
 │   └── shared/
 │       ├── LanguageBadge.tsx
 │       └── SubjectBadge.tsx
@@ -68,10 +105,13 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── useTutorProfile.ts
 │   ├── useBatches.ts
 │   ├── useBatchDetail.ts
+│   ├── useQuestionPapers.ts
+│   ├── useTutorSubjects.ts
 │   ├── useSubmissions.ts
 │   ├── useMarkingResults.ts
 │   ├── useBatchPolling.ts
-│   └── useSubscription.ts
+│   ├── useSubscription.ts
+│   └── useAllSubjects.ts
 │
 ├── lib/
 │   ├── supabase/
@@ -79,11 +119,14 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── server.ts             # server-side client (App Router)
 │   │   └── service.ts            # service-role client (webhooks only)
 │   ├── db/
-│   │   ├── tutors.ts
+│   │   ├── tutors.ts             # tutor profile + getTutorSubjects
+│   │   ├── question-papers.ts    # question paper CRUD
 │   │   ├── batches.ts
+│   │   ├── billing.ts
 │   │   ├── submissions.ts
 │   │   ├── marking-results.ts
-│   │   └── marking-schemes.ts
+│   │   ├── marking-schemes.ts
+│   │   └── reports.ts            # report CRUD (get, create/update, approve)
 │   ├── ai/
 │   │   ├── claude-client.ts
 │   │   ├── mark-paper.ts
@@ -100,7 +143,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── report-renderer.ts
 │   │   └── fonts/
 │   │       ├── NotoSansSinhala.ttf
-│   │       └── NotoSansTamil.ttf
+│   │       ├── NotoSansTamil.ttf
+│   │       ├── noto-sans-sinhala.ts   # Base64 Sinhala font constant
+│   │       └── noto-sans-tamil.ts     # Base64 Tamil font constant
 │   ├── fetcher.ts                 # generic SWR fetcher
 │   ├── api-client.ts              # typed wrappers around /api routes
 │   └── validations/
@@ -126,6 +171,23 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── billing.md
 │       ├── stripe-integration.md
 │       └── feature-gating.md
+│
+├── __tests__/                 # All test files, mirrors source tree structure
+│   ├── lib/
+│   │   ├── stripe/
+│   │   ├── billing/
+│   │   ├── db/
+│   │   ├── ai/
+│   │   └── pdf/
+│   ├── app/api/
+│   ├── hooks/
+│   ├── components/
+│   └── e2e-marking-flow.test.ts  # cross-cutting E2E tests
+│
+├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic)
+│   ├── supabase.ts
+│   ├── stripe.ts
+│   └── anthropic.ts
 │
 ├── CLAUDE.md
 └── package.json

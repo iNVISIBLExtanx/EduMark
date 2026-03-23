@@ -3,23 +3,18 @@
 ## Rule: ZERO data fetching in page.tsx files
 Every `page.tsx` renders ONE top-level component. That component uses SWR hooks.
 
-## SWR Config (app/layout.tsx)
+## SWR Config (components/providers/SWRProvider.tsx)
 ```tsx
-import { SWRConfig } from 'swr';
-import { fetcher } from '@/lib/fetcher';
-
-export default function RootLayout({ children }) {
-  return (
-    <html>
-      <body>
-        <SWRConfig value={{ fetcher, revalidateOnFocus: false, dedupingInterval: 5000 }}>
-          {children}
-        </SWRConfig>
-      </body>
-    </html>
-  );
-}
+<SWRConfig value={{
+  fetcher,
+  revalidateOnFocus: false,
+  dedupingInterval: 5000,
+  keepPreviousData: true,  // serves stale data while revalidating on tab switch
+}}>
 ```
+
+### Why `keepPreviousData: true`
+Without this, navigating away from a tab discards SWR cache for that page's hooks. Returning to the tab shows "Loading..." again while data refetches. With `keepPreviousData`, SWR serves the previously fetched data instantly and revalidates in the background — eliminating the loading flash on tab switch.
 
 ## Global Fetcher (lib/fetcher.ts)
 ```typescript
@@ -79,7 +74,7 @@ After a mutation, call `mutate()` from the relevant SWR hook to revalidate.
 // hooks/useBatchPolling.ts
 export function useBatchPolling(batchId: string, enabled: boolean) {
   const { data, error } = useSWR(
-    enabled ? `/api/batches/${batchId}/results` : null,
+    enabled ? `/api/batches/${batchId}/poll` : null,
     { refreshInterval: 15000 }   // poll every 15s while enabled
   );
   return { results: data, isDone: data?.status === 'completed', error };
@@ -87,12 +82,20 @@ export function useBatchPolling(batchId: string, enabled: boolean) {
 ```
 Set `enabled = batch.status === 'processing'` — stops polling when done.
 
+## Upload Helper (lib/api-client.ts)
+For multipart form uploads (question papers, marking schemes), use `apiUpload` — same auth pattern as `apiFetch` but omits `Content-Type` header so the browser sets the multipart boundary:
+```typescript
+export async function apiUpload<T>(url: string, formData: FormData): Promise<T> { ... }
+```
+
 ## Hooks List
 | Hook | Key | Purpose |
 |---|---|---|
 | `useTutorProfile` | `/api/tutor/profile` | tutor info + marking_language |
+| `useQuestionPapers` | `/api/question-papers` | tutor's question papers |
+| `useTutorSubjects` | `/api/tutor/subjects` | tutor's registered subjects |
 | `useBatches` | `/api/batches` | all batches for tutor |
 | `useBatchDetail` | `/api/batches/[id]` | single batch with submissions |
 | `useSubmissions` | `/api/batches/[id]/submissions` | submissions in a batch |
-| `useMarkingResults` | `/api/submissions/[id]` | per-submission results |
-| `useBatchPolling` | `/api/batches/[id]/results` | polls during processing |
+| `useMarkingResults` | `/api/submissions/[id]` | per-submission results (exports `MarkingResult` interface with `tutor_override`, `override_marks`, `override_feedback` fields) |
+| `useBatchPolling` | `/api/batches/[id]/poll` | polls Claude Batch API during processing |

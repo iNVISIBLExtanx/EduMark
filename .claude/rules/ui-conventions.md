@@ -6,7 +6,7 @@
 - **lucide-react** for icons
 
 ## Component Rules
-1. All page-level components (`BatchList`, `MarkingReview`, etc.) are `'use client'` components
+1. All page-level components (`BatchList`, `BatchDetail`, `SubmissionResultsPanel`, etc.) are `'use client'` components
 2. `page.tsx` files have NO `'use client'` directive — they are server components that just render one child
 3. Never pass server-fetched data as props through `page.tsx` — use SWR hooks inside the component
 
@@ -46,3 +46,19 @@ if (error) return <ErrorMessage message={error.message} />;
 
 ## Form Handling
 Use `react-hook-form` + `zod` for all forms. Define zod schemas in `lib/validations/`.
+
+## Bulk Upload Pattern
+`BulkUploader.tsx` provides drag-and-drop file upload:
+- Drop zone with visual feedback (blue highlight on drag-over)
+- Client-side validation: PDF type, 20MB size limit, 50 file maximum
+- File list with editable student name (auto-populated from filename) + optional index number
+- Uses `apiUpload` from `lib/api-client.ts` for multipart upload
+- Calls `onUploadComplete` callback after success to trigger SWR revalidation
+
+## Dispatch & Polling Pattern
+`BatchDetail.tsx` manages the AI marking lifecycle:
+- `pending` + submissions: "Mark Papers" button (calls `apiFetch` POST dispatch)
+- `processing`: Animated progress text with `useBatchPolling` (15s refresh)
+- `completed`: Green checkmark status
+- `failed`: Red error status
+- 402 errors: `UpgradeModal` for insufficient minutes

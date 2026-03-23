@@ -1,3 +1,5 @@
+> **Status: IMPLEMENTED** — See `lib/pdf/report-renderer.ts` for `buildReportHTML` + `generateReportPDF`, and `app/api/reports/[id]/download/route.ts` for the download endpoint.
+
 # PDF Report Generation
 
 ## Tech: Puppeteer with @sparticuz/chromium

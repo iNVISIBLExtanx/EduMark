@@ -88,21 +88,26 @@ import { createServiceRoleClient } from '@/lib/supabase/service';
 
 export async function checkAndDeductMinutes(tutorId: string, papersCount: number) {
   const supabase = createServiceRoleClient();
-  const { data: tutor } = await supabase
+  const { data: tutor, error } = await supabase
     .from('tutors')
     .select('ai_minutes_used, ai_minutes_limit, subscription_status')
     .eq('id', tutorId)
     .single();
 
+  if (error || !tutor) throw new Error('tutor_not_found');
   if (tutor.subscription_status === 'past_due') throw new Error('subscription_past_due');
   const available = tutor.ai_minutes_limit - tutor.ai_minutes_used;
   if (available < papersCount) throw new Error('insufficient_ai_minutes');
 
   // Atomic increment via SQL function to prevent race conditions
-  await supabase.rpc('increment_ai_minutes_used', {
+  // IMPORTANT: Always check the RPC error — silent failures here mean
+  // minutes aren't deducted but batch dispatch proceeds.
+  const { error: rpcError } = await supabase.rpc('increment_ai_minutes_used', {
     p_tutor_id: tutorId,
     p_amount: papersCount,
   });
+
+  if (rpcError) throw new Error('rpc_error');
 }
 ```
 
