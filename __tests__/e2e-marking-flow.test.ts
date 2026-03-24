@@ -126,11 +126,9 @@ vi.mock('@/lib/db/submissions', () => ({
 
 // --- Mock PDF processing ---
 const mockGetPdfPageCount = vi.fn();
-const mockPdfToImages = vi.fn();
 
 vi.mock('@/lib/pdf/pdf-to-images', () => ({
   getPdfPageCount: (...args: unknown[]) => mockGetPdfPageCount(...args),
-  pdfToImages: (...args: unknown[]) => mockPdfToImages(...args),
 }));
 
 // --- Mock billing ---
@@ -1017,12 +1015,8 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
         subject_id: SUBJECT_ID,
         subjects: [{ name: 'Physics', code: 'PHY' }],
       });
-      // PDF download + conversion
+      // PDF download for native PDF dispatch
       mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
-      mockPdfToImages.mockResolvedValue({
-        images: ['base64img1', 'base64img2'],
-        pageCount: 2,
-      });
       // Claude Batch API
       mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
       // Save claude_batch_id

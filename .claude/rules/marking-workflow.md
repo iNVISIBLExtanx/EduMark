@@ -51,7 +51,7 @@ Order of operations (billing BEFORE Claude):
 5. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
 6. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
 7. `buildSystemPrompt(subject, medium, schemeText)` — cached system block
-8. For each submission: `getSubmissionPdfBuffer(pdf_url)` → `pdfToImages(buffer)` → base64 images
+8. For each submission: `getSubmissionPdfBuffer(pdf_url)` → `pdfBuffer.toString('base64')` → native PDF document block
 9. `anthropic.beta.messages.batches.create({ requests })` — single Batch API job, `custom_id = submission.id`
 10. `updateBatchClaudeBatchId(batchId, claudeBatchId)` + update each submission to `processing`
 

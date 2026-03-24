@@ -6,15 +6,13 @@ import { getMarkingSchemeById } from '@/lib/db/marking-schemes';
 import { getQuestionPaperById } from '@/lib/db/question-papers';
 import { checkAndDeductMinutes } from '@/lib/db/billing';
 import { saveMarkingResults } from '@/lib/db/marking-results';
-import { pdfToImages } from '@/lib/pdf/pdf-to-images';
-
 /**
  * Dispatches all pending submissions in a batch to the Claude Batch API.
  *
  * Order of operations:
  * 1. Load batch context (submissions, scheme, paper/subject)
  * 2. Deduct AI minutes BEFORE calling Claude
- * 3. Convert PDFs to images
+ * 3. Encode PDFs as base64 for native PDF input
  * 4. Build system prompt with cache_control
  * 5. Submit Batch API job
  * 6. Save claude_batch_id to batch
@@ -50,11 +48,11 @@ export async function dispatchMarkingBatch(batchId: string, tutorId: string): Pr
   // 7. Build system prompt (cached across all papers in this batch)
   const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText);
 
-  // 8. Convert each submission's PDF to base64 images and build requests
+  // 8. Encode each submission's PDF as base64 and build requests
   const requests = await Promise.all(
     pendingSubmissions.map(async (sub) => {
       const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
-      const { images } = await pdfToImages(pdfBuffer);
+      const pdfBase64 = pdfBuffer.toString('base64');
 
       return {
         custom_id: sub.id,
@@ -72,14 +70,14 @@ export async function dispatchMarkingBatch(batchId: string, tutorId: string): Pr
             {
               role: 'user' as const,
               content: [
-                ...images.map((img) => ({
-                  type: 'image' as const,
+                {
+                  type: 'document' as const,
                   source: {
                     type: 'base64' as const,
-                    media_type: 'image/png' as const,
-                    data: img,
+                    media_type: 'application/pdf' as const,
+                    data: pdfBase64,
                   },
-                })),
+                },
                 {
                   type: 'text' as const,
                   text: 'Mark this paper per the scheme. Return JSON only.',
