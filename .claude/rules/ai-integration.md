@@ -137,7 +137,7 @@ export async function dispatchMarkingBatch(batchId: string, tutorId: string): Pr
 
   const requests = await Promise.all(submissions.map(async (sub) => {
     const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
-    const { images } = await pdfToImages(pdfBuffer);
+    const pdfBase64 = pdfBuffer.toString('base64');
     return {
       custom_id: sub.id,
       params: {
@@ -145,7 +145,7 @@ export async function dispatchMarkingBatch(batchId: string, tutorId: string): Pr
         max_tokens: 4000,
         system: [{ type: 'text', text: systemPromptText, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: [
-          ...images.map(img => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: img } })),
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
           { type: 'text', text: 'Mark this paper per the scheme. Return JSON only.' },
         ]}],
       },

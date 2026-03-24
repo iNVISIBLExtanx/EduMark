@@ -73,12 +73,6 @@ vi.mock('@/lib/db/marking-results', () => ({
   saveMarkingResults: (...args: unknown[]) => mockSaveMarkingResults(...args),
 }));
 
-const mockPdfToImages = vi.fn();
-
-vi.mock('@/lib/pdf/pdf-to-images', () => ({
-  pdfToImages: (...args: unknown[]) => mockPdfToImages(...args),
-}));
-
 const mockBuildSystemPrompt = vi.fn();
 
 vi.mock('@/lib/ai/mark-paper', () => ({
@@ -162,7 +156,6 @@ beforeEach(() => {
   });
   mockBuildSystemPrompt.mockReturnValue('You are an expert examiner...');
   mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
-  mockPdfToImages.mockResolvedValue({ images: ['base64img1', 'base64img2'], pageCount: 2 });
   mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
   mockUpdateBatchClaudeBatchId.mockResolvedValue(undefined);
   mockUpdateSubmissionStatus.mockResolvedValue(undefined);
@@ -266,16 +259,19 @@ describe('dispatchMarkingBatch', () => {
     expect(systemBlock.cache_control).toEqual({ type: 'ephemeral' });
   });
 
-  it('includes base64 images from pdfToImages in each request', async () => {
+  it('includes PDF document block with base64-encoded PDF in each request', async () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     const createCall = mockBatchesCreate.mock.calls[0][0];
     const userContent = createCall.requests[0].params.messages[0].content;
-    const imageBlocks = userContent.filter((b: { type: string }) => b.type === 'image');
-    expect(imageBlocks).toHaveLength(2);
-    expect(imageBlocks[0].source.data).toBe('base64img1');
-    expect(imageBlocks[1].source.data).toBe('base64img2');
-    expect(imageBlocks[0].source.media_type).toBe('image/png');
+    const docBlocks = userContent.filter((b: { type: string }) => b.type === 'document');
+    expect(docBlocks).toHaveLength(1);
+    expect(docBlocks[0].source.type).toBe('base64');
+    expect(docBlocks[0].source.media_type).toBe('application/pdf');
+    expect(docBlocks[0].source.data).toBe(Buffer.from('fake-pdf').toString('base64'));
+    // Document block + text instruction
+    expect(userContent).toHaveLength(2);
+    expect(userContent[1].type).toBe('text');
   });
 
   it('updates each pending submission status to processing', async () => {

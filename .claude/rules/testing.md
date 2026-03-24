@@ -177,7 +177,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (681 tests, 55 files)
+## Current Test Coverage (669 tests, 55 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -189,7 +189,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/db/submissions.test.ts` | 11 | createStudentAndSubmission, updateBatchPaperCount, getSubmissionById |
 | `__tests__/lib/db/batches.test.ts` | 10 | createBatch, updateBatchStatus, getBatchById, updateBatchName |
 | `__tests__/lib/db/marking-results.test.ts` | 10 | getMarkingResultsBySubmission, getMarkingResultsByBatch, saveMarkingResults, updateMarkingOverride |
-| `__tests__/lib/pdf/pdf-to-images.test.ts` | 17 | PDF conversion, page count, warnings, scale |
+| `__tests__/lib/pdf/pdf-to-images.test.ts` | 5 | getPdfPageCount: page count, lightweight check, error handling |
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
 | `__tests__/lib/ai/mark-paper.test.ts` | 12 | Prompt construction, response parsing, language |
