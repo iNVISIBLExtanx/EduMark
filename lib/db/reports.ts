@@ -36,11 +36,14 @@ export async function approveReport(submissionId: string) {
   const supabase = await createServerClient();
   const { error } = await supabase
     .from('reports')
-    .update({
-      tutor_approved: true,
-      approved_at: new Date().toISOString(),
-    })
-    .eq('submission_id', submissionId);
+    .upsert(
+      {
+        submission_id: submissionId,
+        tutor_approved: true,
+        approved_at: new Date().toISOString(),
+      },
+      { onConflict: 'submission_id' }
+    );
 
   if (error) throw error;
 }

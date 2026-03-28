@@ -11,18 +11,28 @@ import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 
 export async function generateReportPDF(html: string): Promise<Buffer> {
+  const isDev = process.env.NODE_ENV === 'development';
+
   const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
+    args: isDev ? [] : chromium.args,
+    executablePath: isDev
+      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      : await chromium.executablePath(),
+    headless: true,
   });
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: 'networkidle0' });
-  const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
-  await browser.close();
-  return Buffer.from(pdf);
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
 }
 ```
+
+**Note**: `@sparticuz/chromium` only works on Linux/serverless. In development (`NODE_ENV=development`), the function falls back to local Chrome. The `try/finally` ensures the browser is always closed.
 
 ## Report HTML Template
 The report HTML must be generated server-side (in the API route) and passed to Puppeteer.
@@ -64,14 +74,17 @@ Store the base64 font strings in `lib/pdf/fonts/` as `.ts` constants.
 
 ## API Route
 ```typescript
-// app/api/reports/[submissionId]/route.ts
+// app/api/reports/[id]/download/route.ts
 export async function GET(req, { params }) {
-  const results = await getMarkingResults(params.submissionId);  // lib/db
+  // Verify ownership, check report is approved
+  const results = await getMarkingResultsBySubmission(submissionId);  // lib/db
   const html = buildReportHTML(results);  // lib/pdf/report-renderer.ts helper
   const pdfBuffer = await generateReportPDF(html);
-  // upload to Supabase storage, return signed URL
+  // upload to Supabase storage, update reports table
   return new Response(pdfBuffer, {
     headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="report.pdf"' }
   });
 }
 ```
+
+**Note**: `approveReport()` uses `upsert` (not `update`) with `onConflict: 'submission_id'` to handle the case where no report record exists yet. This prevents the chicken-and-egg problem where download checks for an approved report but no record exists.

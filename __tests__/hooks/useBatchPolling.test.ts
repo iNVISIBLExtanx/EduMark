@@ -27,15 +27,17 @@ describe('useBatchPolling', () => {
   });
 
   it('returns isDone true when status is completed', () => {
-    mockUseSWR.mockReturnValue({ data: { status: 'completed', results: [] }, error: undefined });
+    mockUseSWR.mockReturnValue({ data: { status: 'completed', marked: 5, total: 5 }, error: undefined });
     const { result } = renderHook(() => useBatchPolling('batch-123', true));
     expect(result.current.isDone).toBe(true);
+    expect(result.current.pollData?.marked).toBe(5);
   });
 
   it('returns isDone false when status is processing', () => {
     mockUseSWR.mockReturnValue({ data: { status: 'processing', marked: 2, total: 5 }, error: undefined });
     const { result } = renderHook(() => useBatchPolling('batch-123', true));
     expect(result.current.isDone).toBe(false);
+    expect(result.current.pollData?.marked).toBe(2);
   });
 
   it('returns error from SWR', () => {

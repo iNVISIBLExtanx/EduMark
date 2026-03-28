@@ -123,7 +123,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockUseBatchDetail.mockReturnValue(defaultBatch);
   mockUseSubmissions.mockReturnValue(defaultSubmissions);
-  mockUseBatchPolling.mockReturnValue({ results: null, isDone: false, error: null });
+  mockUseBatchPolling.mockReturnValue({ pollData: null, isDone: false, error: null });
   mockUseSubscription.mockReturnValue({ available: 40, subscription: { plan: 'starter' }, isFree: false, isLoading: false, error: null, usagePercent: 20, isPastDue: false, mutate: vi.fn() });
 });
 

@@ -231,4 +231,29 @@ describe('generateReportPDF', () => {
     await expect(generateReportPDF('<html></html>')).rejects.toThrow('render failed');
     expect(mockBrowser.close).toHaveBeenCalled();
   });
+
+  it('uses local Chrome path in development mode', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+
+    await generateReportPDF('<html></html>');
+
+    const launchArgs = (puppeteer.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(launchArgs.executablePath).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    expect(launchArgs.args).toEqual([]);
+
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it('uses chromium args in production mode', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    await generateReportPDF('<html></html>');
+
+    const launchArgs = (puppeteer.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(launchArgs.args).toEqual(['--no-sandbox']);
+
+    process.env.NODE_ENV = originalEnv;
+  });
 });
