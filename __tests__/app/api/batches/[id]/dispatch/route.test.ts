@@ -23,9 +23,11 @@ vi.mock('@/lib/db/batches', () => ({
   getBatchById: (...args: unknown[]) => mockGetBatchById(...args),
 }));
 
-const mockDispatchMarkingBatch = vi.fn();
+const mockPrepareMarking = vi.fn();
+const mockExecuteMarking = vi.fn();
 vi.mock('@/lib/ai/batch-dispatcher', () => ({
-  dispatchMarkingBatch: (...args: unknown[]) => mockDispatchMarkingBatch(...args),
+  prepareMarking: (...args: unknown[]) => mockPrepareMarking(...args),
+  executeMarking: (...args: unknown[]) => mockExecuteMarking(...args),
 }));
 
 // Import AFTER mocks
@@ -33,7 +35,6 @@ import { POST } from '@/app/api/batches/[id]/dispatch/route';
 
 const TEST_USER = { id: '00000000-0000-4000-8000-000000000001', email: 'tutor@test.lk' };
 const BATCH_ID = '00000000-0000-4000-8000-000000000040';
-const CLAUDE_BATCH_ID = 'msgbatch_abc123';
 
 function makeRequest() {
   return new Request('http://localhost/api/batches/test/dispatch', { method: 'POST' });
@@ -72,7 +73,12 @@ describe('POST /api/batches/[id]/dispatch', () => {
     mockGetUser.mockResolvedValue({ data: { user: TEST_USER } });
     mockGetBillingStatus.mockResolvedValue(activeBilling());
     mockGetBatchById.mockResolvedValue(makeBatch());
-    mockDispatchMarkingBatch.mockResolvedValue(CLAUDE_BATCH_ID);
+    mockPrepareMarking.mockResolvedValue({
+      batch: makeBatch(),
+      pendingSubmissions: [{ id: 'sub-1', pdf_url: 'test.pdf' }],
+      systemPromptText: 'system prompt',
+    });
+    mockExecuteMarking.mockResolvedValue('direct');
   });
 
   it('returns 401 when user is not authenticated', async () => {
@@ -157,24 +163,33 @@ describe('POST /api/batches/[id]/dispatch', () => {
     expect(body.needed).toBe(1);
   });
 
-  it('returns 200 with claude_batch_id on successful dispatch', async () => {
+  it('returns 200 with processing status on successful dispatch', async () => {
     const res = await POST(makeRequest(), makeParams());
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.claude_batch_id).toBe(CLAUDE_BATCH_ID);
     expect(body.status).toBe('processing');
   });
 
-  it('calls dispatchMarkingBatch with correct batchId and userId', async () => {
+  it('calls prepareMarking with correct batchId and userId', async () => {
     await POST(makeRequest(), makeParams());
 
-    expect(mockDispatchMarkingBatch).toHaveBeenCalledOnce();
-    expect(mockDispatchMarkingBatch).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
+    expect(mockPrepareMarking).toHaveBeenCalledOnce();
+    expect(mockPrepareMarking).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
   });
 
-  it('returns 400 when dispatchMarkingBatch throws no_pending_submissions', async () => {
-    mockDispatchMarkingBatch.mockRejectedValue(new Error('no_pending_submissions'));
+  it('calls executeMarking with batch context from prepareMarking', async () => {
+    await POST(makeRequest(), makeParams());
+
+    expect(mockExecuteMarking).toHaveBeenCalledWith(
+      BATCH_ID,
+      [{ id: 'sub-1', pdf_url: 'test.pdf' }],
+      'system prompt',
+    );
+  });
+
+  it('returns 400 when prepareMarking throws no_pending_submissions', async () => {
+    mockPrepareMarking.mockRejectedValue(new Error('no_pending_submissions'));
 
     const res = await POST(makeRequest(), makeParams());
     const body = await res.json();
@@ -183,8 +198,8 @@ describe('POST /api/batches/[id]/dispatch', () => {
     expect(body.error).toBe('No pending submissions in batch');
   });
 
-  it('returns 500 when dispatchMarkingBatch throws unexpected error', async () => {
-    mockDispatchMarkingBatch.mockRejectedValue(new Error('claude_api_timeout'));
+  it('returns 500 when prepareMarking throws unexpected error', async () => {
+    mockPrepareMarking.mockRejectedValue(new Error('claude_api_timeout'));
 
     const res = await POST(makeRequest(), makeParams());
     const body = await res.json();
@@ -207,5 +222,26 @@ describe('POST /api/batches/[id]/dispatch', () => {
     await POST(makeRequest(), makeParams());
 
     expect(mockGetBatchById).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id);
+  });
+
+  it('returns 400 when batch is already dispatched', async () => {
+    mockGetBatchById.mockResolvedValue(makeBatch({ status: 'processing' }));
+
+    const res = await POST(makeRequest(), makeParams());
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('batch_already_dispatched');
+    expect(mockPrepareMarking).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 even if executeMarking fails (fire-and-forget)', async () => {
+    mockExecuteMarking.mockRejectedValue(new Error('Background failure'));
+
+    const res = await POST(makeRequest(), makeParams());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('processing');
   });
 });

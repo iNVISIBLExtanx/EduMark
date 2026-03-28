@@ -1,7 +1,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 import { getBillingStatus, isActive, hasMinutes } from '@/lib/billing/gate';
 import { getBatchById } from '@/lib/db/batches';
-import { dispatchMarkingBatch } from '@/lib/ai/batch-dispatcher';
+import { prepareMarking, executeMarking } from '@/lib/ai/batch-dispatcher';
 import { NextResponse } from 'next/server';
 
 export async function POST(
@@ -48,8 +48,16 @@ export async function POST(
   }
 
   try {
-    const claudeBatchId = await dispatchMarkingBatch(batchId, user.id);
-    return NextResponse.json({ claude_batch_id: claudeBatchId, status: 'processing' });
+    // Phase 1: Validate, deduct billing, load context (awaited — errors caught here)
+    const { pendingSubmissions, systemPromptText } = await prepareMarking(batchId, user.id);
+
+    // Phase 2: Fire and forget — streaming/Batch API runs in background.
+    // The frontend polls /api/batches/[id]/poll for progress.
+    executeMarking(batchId, pendingSubmissions, systemPromptText).catch((err) => {
+      console.error('[dispatch] Background marking failed:', err instanceof Error ? err.message : err);
+    });
+
+    return NextResponse.json({ status: 'processing' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'dispatch_failed';
     if (message === 'no_pending_submissions') {

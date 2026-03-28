@@ -15,7 +15,7 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/ai/mark-paper', () => ({}));
 
-import { getMarkingResultsByBatch, updateMarkingOverride } from '@/lib/db/marking-results';
+import { getMarkingResultsByBatch, updateMarkingOverride, saveMarkingResults } from '@/lib/db/marking-results';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -102,6 +102,93 @@ describe('updateMarkingOverride', () => {
     expect(mockSupabaseClient.update).toHaveBeenCalledWith(
       expect.objectContaining({ tutor_override: true })
     );
+  });
+});
+
+describe('saveMarkingResults', () => {
+  function setupInsertChain(resolvedValue: { error: unknown }) {
+    mockSupabaseClient.insert.mockResolvedValueOnce(resolvedValue);
+  }
+
+  const validResult = {
+    questions: [
+      {
+        question_no: 1,
+        max_marks: 10,
+        awarded_marks: 7,
+        student_answer_text: 'F=ma',
+        feedback: 'Good',
+        ocr_confidence: 'high' as const,
+      },
+    ],
+    total_awarded: 7,
+    total_max: 10,
+    general_feedback: 'Well done',
+  };
+
+  it('inserts marking result rows into marking_results table', async () => {
+    setupInsertChain({ error: null });
+
+    await saveMarkingResults('sub-1', validResult);
+
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('marking_results');
+    expect(mockSupabaseClient.insert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        submission_id: 'sub-1',
+        question_no: 1,
+        max_marks: 10,
+        awarded_marks: 7,
+        feedback: 'Good',
+        ocr_confidence: 'high',
+      }),
+    ]);
+  });
+
+  it('sanitizes ocr_confidence "medium" to "low"', async () => {
+    setupInsertChain({ error: null });
+    const resultWithMedium = {
+      ...validResult,
+      questions: [{
+        ...validResult.questions[0],
+        ocr_confidence: 'medium' as unknown as 'high' | 'low',
+      }],
+    };
+
+    await saveMarkingResults('sub-1', resultWithMedium);
+
+    const insertedRows = mockSupabaseClient.insert.mock.calls[0][0];
+    expect(insertedRows[0].ocr_confidence).toBe('low');
+  });
+
+  it('sanitizes any non-high ocr_confidence to "low"', async () => {
+    setupInsertChain({ error: null });
+    const resultWithUnknown = {
+      ...validResult,
+      questions: [{
+        ...validResult.questions[0],
+        ocr_confidence: 'unknown' as unknown as 'high' | 'low',
+      }],
+    };
+
+    await saveMarkingResults('sub-1', resultWithUnknown);
+
+    const insertedRows = mockSupabaseClient.insert.mock.calls[0][0];
+    expect(insertedRows[0].ocr_confidence).toBe('low');
+  });
+
+  it('keeps ocr_confidence "high" as "high"', async () => {
+    setupInsertChain({ error: null });
+
+    await saveMarkingResults('sub-1', validResult);
+
+    const insertedRows = mockSupabaseClient.insert.mock.calls[0][0];
+    expect(insertedRows[0].ocr_confidence).toBe('high');
+  });
+
+  it('throws on insert error', async () => {
+    setupInsertChain({ error: { message: 'Insert failed' } });
+
+    await expect(saveMarkingResults('sub-1', validResult)).rejects.toEqual({ message: 'Insert failed' });
   });
 });
 

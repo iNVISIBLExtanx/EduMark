@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+
 const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
   sinhala: `
     Read the handwritten answers carefully. The student has written in Sinhala.
@@ -16,19 +19,30 @@ const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
   `,
 };
 
-export interface MarkingResult {
-  questions: {
-    question_no: number;
-    max_marks: number;
-    awarded_marks: number;
-    student_answer_text: string;
-    feedback: string;
-    ocr_confidence: 'high' | 'low';
-  }[];
-  total_awarded: number;
-  total_max: number;
-  general_feedback: string;
-}
+/**
+ * Zod schema for structured output — guarantees valid JSON from Claude.
+ * The ocr_confidence enum enforces only 'high' | 'low' (matching DB constraint).
+ */
+export const markingResultSchema = z.object({
+  questions: z.array(
+    z.object({
+      question_no: z.number(),
+      max_marks: z.number(),
+      awarded_marks: z.number(),
+      student_answer_text: z.string(),
+      feedback: z.string(),
+      ocr_confidence: z.enum(['high', 'low']),
+    }),
+  ),
+  total_awarded: z.number(),
+  total_max: z.number(),
+  general_feedback: z.string(),
+});
+
+export type MarkingResult = z.infer<typeof markingResultSchema>;
+
+/** Pre-built output format for Claude API — reused across all dispatch calls */
+export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 
 export function buildSystemPrompt(
   subject: string,
@@ -42,21 +56,5 @@ ${LANGUAGE_INSTRUCTIONS[medium] ?? LANGUAGE_INSTRUCTIONS.english}
 ## Marking Scheme
 ${markingSchemeText}
 
-## Output Format
-Return ONLY valid JSON matching this exact schema:
-{
-  "questions": [
-    {
-      "question_no": 1,
-      "max_marks": 10,
-      "awarded_marks": 7,
-      "student_answer_text": "...",
-      "feedback": "...",
-      "ocr_confidence": "high"
-    }
-  ],
-  "total_awarded": 7,
-  "total_max": 10,
-  "general_feedback": "..."
-}`;
+Mark each question according to the scheme. For each question provide: question number, max marks, awarded marks, a transcription of the student's answer, detailed feedback, and OCR confidence ("high" if handwriting is clear, "low" if unclear).`;
 }

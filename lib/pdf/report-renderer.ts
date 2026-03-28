@@ -262,9 +262,13 @@ export function buildReportHTML(params: ReportHTMLParams): string {
 }
 
 export async function generateReportPDF(html: string): Promise<Buffer> {
+  const isDev = process.env.NODE_ENV === 'development';
+
   const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    args: isDev ? [] : chromium.args,
+    executablePath: isDev
+      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      : await chromium.executablePath(),
     headless: true,
   });
 

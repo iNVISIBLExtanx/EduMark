@@ -21,7 +21,9 @@ export async function saveMarkingResults(submissionId: string, result: MarkingRe
     awarded_marks: q.awarded_marks,
     student_answer_text: q.student_answer_text,
     feedback: q.feedback,
-    ocr_confidence: q.ocr_confidence,
+    // Defense in depth: DB constraint only allows 'high' | 'low'.
+    // Structured outputs enforce this via schema, but sanitize as safety net.
+    ocr_confidence: q.ocr_confidence === 'high' ? 'high' : 'low',
   }));
   const { error } = await supabase
     .from('marking_results')

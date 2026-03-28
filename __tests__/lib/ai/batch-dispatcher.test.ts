@@ -18,7 +18,7 @@ const MOCK_MARKING_RESULT = {
       awarded_marks: 7,
       student_answer_text: 'F=ma',
       feedback: 'Good',
-      ocr_confidence: 'high',
+      ocr_confidence: 'high' as const,
     },
   ],
   total_awarded: 7,
@@ -74,17 +74,27 @@ vi.mock('@/lib/db/marking-results', () => ({
 }));
 
 const mockBuildSystemPrompt = vi.fn();
+const mockMarkingOutputFormat = { type: 'json_schema', schema: {} };
+const mockMarkingResultSchema = {
+  parse: vi.fn((val: unknown) => val),
+};
 
 vi.mock('@/lib/ai/mark-paper', () => ({
   buildSystemPrompt: (...args: unknown[]) => mockBuildSystemPrompt(...args),
+  markingOutputFormat: { type: 'json_schema', schema: {} },
+  markingResultSchema: { parse: (val: unknown) => mockMarkingResultSchema.parse(val) },
 }));
 
 const mockBatchesCreate = vi.fn();
 const mockBatchesRetrieve = vi.fn();
 const mockBatchesResults = vi.fn();
+const mockMessagesStream = vi.fn();
 
 vi.mock('@/lib/ai/claude-client', () => ({
   anthropic: {
+    messages: {
+      stream: (...args: unknown[]) => mockMessagesStream(...args),
+    },
     beta: {
       messages: {
         batches: {
@@ -98,7 +108,7 @@ vi.mock('@/lib/ai/claude-client', () => ({
 }));
 
 // --- Import after mocks ---
-import { dispatchMarkingBatch, pollBatchResults } from '@/lib/ai/batch-dispatcher';
+import { dispatchMarkingBatch, pollBatchResults, prepareMarking, executeMarking } from '@/lib/ai/batch-dispatcher';
 
 // --- Test data factories ---
 function makeBatch(overrides = {}) {
@@ -157,48 +167,30 @@ beforeEach(() => {
   mockBuildSystemPrompt.mockReturnValue('You are an expert examiner...');
   mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
   mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
+  mockMessagesStream.mockReturnValue({
+    finalMessage: () => Promise.resolve({
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
+    }),
+  });
   mockUpdateBatchClaudeBatchId.mockResolvedValue(undefined);
   mockUpdateSubmissionStatus.mockResolvedValue(undefined);
   mockSaveMarkingResults.mockResolvedValue(undefined);
   mockUpdateBatchMarkedPapers.mockResolvedValue(undefined);
+  mockMarkingResultSchema.parse.mockImplementation((val: unknown) => val);
 });
 
+// --- Helper: create many submissions to force Batch API path (>10) ---
+function makeManySubmissions(count: number) {
+  return Array.from({ length: count }, (_, i) =>
+    makeSubmission(`sub-${String(i).padStart(4, '0')}`)
+  );
+}
+
 // ============================================================
-// dispatchMarkingBatch
+// dispatchMarkingBatch — shared behavior
 // ============================================================
 describe('dispatchMarkingBatch', () => {
-  it('returns the claude batch id on happy path', async () => {
-    const result = await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-    expect(result).toBe(CLAUDE_BATCH_ID);
-  });
-
-  it('calls checkAndDeductMinutes BEFORE anthropic batch create', async () => {
-    const callOrder: string[] = [];
-    mockCheckAndDeductMinutes.mockImplementation(async () => {
-      callOrder.push('deduct');
-    });
-    mockBatchesCreate.mockImplementation(async () => {
-      callOrder.push('claude');
-      return { id: CLAUDE_BATCH_ID };
-    });
-
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    expect(callOrder).toEqual(['deduct', 'claude']);
-  });
-
-  it('sets batch status to processing', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'processing');
-  });
-
-  it('saves claude_batch_id to the database', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    expect(mockUpdateBatchClaudeBatchId).toHaveBeenCalledWith(BATCH_ID, CLAUDE_BATCH_ID);
-  });
-
   it('throws no_pending_submissions when all submissions are already marked', async () => {
     mockGetSubmissionsByBatch.mockResolvedValue([
       makeSubmission(SUBMISSION_ID_1, 'marked'),
@@ -216,12 +208,11 @@ describe('dispatchMarkingBatch', () => {
     await expect(dispatchMarkingBatch(BATCH_ID, TUTOR_ID)).rejects.toThrow(
       'insufficient_ai_minutes',
     );
-    // Claude should NOT have been called
     expect(mockBatchesCreate).not.toHaveBeenCalled();
+    expect(mockMessagesStream).not.toHaveBeenCalled();
   });
 
   it('deducts minutes equal to the number of pending submissions only', async () => {
-    // One pending, one already marked
     mockGetSubmissionsByBatch.mockResolvedValue([
       makeSubmission(SUBMISSION_ID_1, 'pending'),
       makeSubmission(SUBMISSION_ID_2, 'marked'),
@@ -232,15 +223,6 @@ describe('dispatchMarkingBatch', () => {
     expect(mockCheckAndDeductMinutes).toHaveBeenCalledWith(TUTOR_ID, 1);
   });
 
-  it('sets custom_id on each request matching the submission id', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    const createCall = mockBatchesCreate.mock.calls[0][0];
-    const customIds = createCall.requests.map((r: { custom_id: string }) => r.custom_id);
-    expect(customIds).toContain(SUBMISSION_ID_1);
-    expect(customIds).toContain(SUBMISSION_ID_2);
-  });
-
   it('builds system prompt with correct subject, medium, and scheme text', async () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
@@ -249,51 +231,6 @@ describe('dispatchMarkingBatch', () => {
       'english',
       JSON.stringify({ questions: [{ no: 1, marks: 10 }] }),
     );
-  });
-
-  it('includes cache_control ephemeral on the system block', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    const createCall = mockBatchesCreate.mock.calls[0][0];
-    const systemBlock = createCall.requests[0].params.system[0];
-    expect(systemBlock.cache_control).toEqual({ type: 'ephemeral' });
-  });
-
-  it('includes PDF document block with base64-encoded PDF in each request', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    const createCall = mockBatchesCreate.mock.calls[0][0];
-    const userContent = createCall.requests[0].params.messages[0].content;
-    const docBlocks = userContent.filter((b: { type: string }) => b.type === 'document');
-    expect(docBlocks).toHaveLength(1);
-    expect(docBlocks[0].source.type).toBe('base64');
-    expect(docBlocks[0].source.media_type).toBe('application/pdf');
-    expect(docBlocks[0].source.data).toBe(Buffer.from('fake-pdf').toString('base64'));
-    // Document block + text instruction
-    expect(userContent).toHaveLength(2);
-    expect(userContent[1].type).toBe('text');
-  });
-
-  it('updates each pending submission status to processing', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(
-      SUBMISSION_ID_1,
-      'processing',
-      SUBMISSION_ID_1,
-    );
-    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(
-      SUBMISSION_ID_2,
-      'processing',
-      SUBMISSION_ID_2,
-    );
-  });
-
-  it('uses model claude-sonnet-4-6', async () => {
-    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
-
-    const createCall = mockBatchesCreate.mock.calls[0][0];
-    expect(createCall.requests[0].params.model).toBe('claude-sonnet-4-6');
   });
 
   it('uses empty string for scheme text when structure_json is null', async () => {
@@ -325,14 +262,249 @@ describe('dispatchMarkingBatch', () => {
       expect.any(String),
     );
   });
+
+  it('sets batch status to processing', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'processing');
+  });
+});
+
+// ============================================================
+// dispatchMarkingBatch — direct mode (≤10 papers)
+// ============================================================
+describe('dispatchMarkingBatch (direct mode)', () => {
+  it('returns "direct" for small batches', async () => {
+    const result = await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+    expect(result).toBe('direct');
+  });
+
+  it('calls messages.stream (not batch API) for ≤10 papers', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesStream).toHaveBeenCalledTimes(2);
+    expect(mockBatchesCreate).not.toHaveBeenCalled();
+  });
+
+  it('saves marking results and marks submissions as marked', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockSaveMarkingResults).toHaveBeenCalledWith(SUBMISSION_ID_1, MOCK_MARKING_RESULT);
+    expect(mockSaveMarkingResults).toHaveBeenCalledWith(SUBMISSION_ID_2, MOCK_MARKING_RESULT);
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'marked');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'marked');
+  });
+
+  it('sets batch to completed after all papers marked', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'completed');
+  });
+
+  it('marks submission as failed when messages.stream throws', async () => {
+    mockMessagesStream
+      .mockReturnValueOnce({
+        finalMessage: () => Promise.resolve({
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
+        }),
+      })
+      .mockReturnValueOnce({
+        finalMessage: () => Promise.reject(new Error('API error')),
+      });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'marked');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'failed');
+    // Mixed results → completed
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'completed');
+  });
+
+  it('uses model claude-sonnet-4-6 with max_tokens 32000', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const call = mockMessagesStream.mock.calls[0][0];
+    expect(call.model).toBe('claude-sonnet-4-6');
+    expect(call.max_tokens).toBe(32000);
+  });
+
+  it('includes cache_control ephemeral on the system block', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const call = mockMessagesStream.mock.calls[0][0];
+    expect(call.system[0].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('sends PDF as native document block', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const call = mockMessagesStream.mock.calls[0][0];
+    const docBlock = call.messages[0].content.find((b: { type: string }) => b.type === 'document');
+    expect(docBlock.source.type).toBe('base64');
+    expect(docBlock.source.media_type).toBe('application/pdf');
+    expect(docBlock.source.data).toBe(Buffer.from('fake-pdf').toString('base64'));
+  });
+
+  it('includes output_config with structured output format', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const call = mockMessagesStream.mock.calls[0][0];
+    expect(call.output_config).toBeDefined();
+    expect(call.output_config.format).toBeDefined();
+    expect(call.output_config.format.type).toBe('json_schema');
+  });
+
+  it('marks submission as failed when stop_reason is max_tokens (truncation)', async () => {
+    mockMessagesStream.mockReturnValue({
+      finalMessage: () => Promise.resolve({
+        stop_reason: 'max_tokens',
+        content: [{ type: 'text', text: '{"questions": [{"question_no": 1' }],
+      }),
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'failed');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'failed');
+    expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'failed');
+  });
+});
+
+// ============================================================
+// dispatchMarkingBatch — Batch API mode (>10 papers)
+// ============================================================
+describe('dispatchMarkingBatch (Batch API mode)', () => {
+  beforeEach(() => {
+    mockGetSubmissionsByBatch.mockResolvedValue(makeManySubmissions(11));
+  });
+
+  it('returns the claude batch id for >10 papers', async () => {
+    const result = await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+    expect(result).toBe(CLAUDE_BATCH_ID);
+  });
+
+  it('calls batch API (not messages.stream) for >10 papers', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockBatchesCreate).toHaveBeenCalledTimes(1);
+    expect(mockMessagesStream).not.toHaveBeenCalled();
+  });
+
+  it('saves claude_batch_id to the database', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateBatchClaudeBatchId).toHaveBeenCalledWith(BATCH_ID, CLAUDE_BATCH_ID);
+  });
+
+  it('sets custom_id on each request matching the submission id', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const createCall = mockBatchesCreate.mock.calls[0][0];
+    expect(createCall.requests).toHaveLength(11);
+    expect(createCall.requests[0].custom_id).toBe('sub-0000');
+  });
+
+  it('uses model claude-sonnet-4-6 with max_tokens 32000', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const createCall = mockBatchesCreate.mock.calls[0][0];
+    expect(createCall.requests[0].params.model).toBe('claude-sonnet-4-6');
+    expect(createCall.requests[0].params.max_tokens).toBe(32000);
+  });
+
+  it('uses 1-hour cache TTL for batch API (higher cache hit rate)', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const createCall = mockBatchesCreate.mock.calls[0][0];
+    expect(createCall.requests[0].params.system[0].cache_control).toEqual({
+      type: 'ephemeral',
+      ttl: '1h',
+    });
+  });
+
+  it('includes output_config with structured output format in batch requests', async () => {
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const createCall = mockBatchesCreate.mock.calls[0][0];
+    expect(createCall.requests[0].params.output_config).toBeDefined();
+    expect(createCall.requests[0].params.output_config.format.type).toBe('json_schema');
+  });
+
+  it('sets batch status to processing AFTER successful Claude API call', async () => {
+    const callOrder: string[] = [];
+    mockBatchesCreate.mockImplementation(async () => {
+      callOrder.push('claude');
+      return { id: CLAUDE_BATCH_ID };
+    });
+    mockUpdateBatchStatus.mockImplementation(async () => {
+      callOrder.push('status');
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(callOrder.indexOf('claude')).toBeLessThan(callOrder.indexOf('status'));
+  });
+});
+
+// ============================================================
+// prepareMarking + executeMarking (two-phase dispatch)
+// ============================================================
+describe('prepareMarking', () => {
+  it('returns pendingSubmissions and systemPromptText', async () => {
+    const result = await prepareMarking(BATCH_ID, TUTOR_ID);
+    expect(result.pendingSubmissions).toHaveLength(2);
+    expect(result.systemPromptText).toBe('You are an expert examiner...');
+    expect(result.batch).toBeDefined();
+  });
+
+  it('deducts billing minutes', async () => {
+    await prepareMarking(BATCH_ID, TUTOR_ID);
+    expect(mockCheckAndDeductMinutes).toHaveBeenCalledWith(TUTOR_ID, 2);
+  });
+
+  it('throws when no pending submissions', async () => {
+    mockGetSubmissionsByBatch.mockResolvedValue([
+      makeSubmission(SUBMISSION_ID_1, 'marked'),
+    ]);
+    await expect(prepareMarking(BATCH_ID, TUTOR_ID)).rejects.toThrow('no_pending_submissions');
+  });
+});
+
+describe('executeMarking', () => {
+  it('uses direct mode for ≤10 submissions', async () => {
+    const subs = [{ id: SUBMISSION_ID_1, pdf_url: 'test.pdf' }, { id: SUBMISSION_ID_2, pdf_url: 'test2.pdf' }];
+    const result = await executeMarking(BATCH_ID, subs, 'system prompt');
+    expect(result).toBe('direct');
+    expect(mockMessagesStream).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses Batch API for >10 submissions', async () => {
+    const subs = Array.from({ length: 11 }, (_, i) => ({ id: `sub-${i}`, pdf_url: `test-${i}.pdf` }));
+    const result = await executeMarking(BATCH_ID, subs, 'system prompt');
+    expect(result).toBe(CLAUDE_BATCH_ID);
+    expect(mockBatchesCreate).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ============================================================
 // pollBatchResults
 // ============================================================
 describe('pollBatchResults', () => {
-  it('throws batch_not_dispatched when no claude_batch_id', async () => {
-    mockGetBatchById.mockResolvedValue(makeBatch({ claude_batch_id: null }));
+  it('returns processing status for direct marking (no claude_batch_id, status processing)', async () => {
+    mockGetBatchById.mockResolvedValue(
+      makeBatch({ claude_batch_id: null, status: 'processing', marked_papers: 1, total_papers: 2 }),
+    );
+
+    const result = await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    expect(result).toEqual({ status: 'processing', marked: 1, total: 2 });
+    expect(mockBatchesRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('throws batch_not_dispatched when no claude_batch_id and status is pending', async () => {
+    mockGetBatchById.mockResolvedValue(makeBatch({ claude_batch_id: null, status: 'pending' }));
 
     await expect(pollBatchResults(BATCH_ID, TUTOR_ID)).rejects.toThrow(
       'batch_not_dispatched',
@@ -373,6 +545,7 @@ describe('pollBatchResults', () => {
           result: {
             type: 'succeeded',
             message: {
+              stop_reason: 'end_turn',
               content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
             },
           },
@@ -397,6 +570,7 @@ describe('pollBatchResults', () => {
           result: {
             type: 'succeeded',
             message: {
+              stop_reason: 'end_turn',
               content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
             },
           },
@@ -421,6 +595,7 @@ describe('pollBatchResults', () => {
           result: {
             type: 'succeeded',
             message: {
+              stop_reason: 'end_turn',
               content: [{ type: 'text', text: 'not valid json {{{' }],
             },
           },
@@ -467,14 +642,14 @@ describe('pollBatchResults', () => {
           custom_id: SUBMISSION_ID_1,
           result: {
             type: 'succeeded',
-            message: { content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
+            message: { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
           },
         };
         yield {
           custom_id: SUBMISSION_ID_2,
           result: {
             type: 'succeeded',
-            message: { content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
+            message: { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
           },
         };
       },
@@ -523,7 +698,7 @@ describe('pollBatchResults', () => {
           custom_id: SUBMISSION_ID_1,
           result: {
             type: 'succeeded',
-            message: { content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
+            message: { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }] },
           },
         };
         yield {
@@ -553,6 +728,7 @@ describe('pollBatchResults', () => {
           result: {
             type: 'succeeded',
             message: {
+              stop_reason: 'end_turn',
               content: [{ type: 'image', source: { type: 'base64', data: 'abc' } }],
             },
           },
@@ -564,5 +740,54 @@ describe('pollBatchResults', () => {
 
     expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'failed');
     expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+  });
+
+  it('marks submission as failed when stop_reason is max_tokens (truncation)', async () => {
+    mockGetBatchById.mockResolvedValue(
+      makeBatch({ claude_batch_id: CLAUDE_BATCH_ID, total_papers: 1 }),
+    );
+    mockBatchesRetrieve.mockResolvedValue({ processing_status: 'ended' });
+    mockBatchesResults.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield {
+          custom_id: SUBMISSION_ID_1,
+          result: {
+            type: 'succeeded',
+            message: {
+              stop_reason: 'max_tokens',
+              content: [{ type: 'text', text: '{"questions": [{"question_no": 1' }],
+            },
+          },
+        };
+      },
+    });
+
+    await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'failed');
+    expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+  });
+
+  it('returns cached result without re-processing when batch is already completed', async () => {
+    mockGetBatchById.mockResolvedValue(
+      makeBatch({ claude_batch_id: CLAUDE_BATCH_ID, status: 'completed', marked_papers: 2, total_papers: 2 }),
+    );
+
+    const result = await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    expect(result).toEqual({ status: 'completed', marked: 2, total: 2 });
+    expect(mockBatchesRetrieve).not.toHaveBeenCalled();
+    expect(mockBatchesResults).not.toHaveBeenCalled();
+  });
+
+  it('returns cached result without re-processing when batch is already failed', async () => {
+    mockGetBatchById.mockResolvedValue(
+      makeBatch({ claude_batch_id: CLAUDE_BATCH_ID, status: 'failed', marked_papers: 0, total_papers: 2 }),
+    );
+
+    const result = await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    expect(result).toEqual({ status: 'failed', marked: 0, total: 2 });
+    expect(mockBatchesRetrieve).not.toHaveBeenCalled();
   });
 });

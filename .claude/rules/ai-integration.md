@@ -11,24 +11,29 @@
 
 ---
 
-## Token Optimization Strategy (ALWAYS apply both)
+## Token Optimization Strategy (ALWAYS apply all three)
 
 ### 1. Prompt Caching
 The marking scheme system block MUST use `cache_control`. This is the static prefix shared across all papers in a batch.
 
+- **Direct mode (≤10 papers)**: `cache_control: { type: 'ephemeral' }` — default 5-minute TTL
+- **Batch API (>10 papers)**: `cache_control: { type: 'ephemeral', ttl: '1h' }` — 1-hour TTL for higher cache hit rate across batch processing
+
+### 2. Structured Outputs
+All marking calls use `output_config.format` with `zodOutputFormat()` from `@anthropic-ai/sdk/helpers/zod`. This guarantees valid JSON matching the Zod schema at the inference level — no JSON instructions needed in the prompt.
+
 ```typescript
-// lib/ai/mark-paper.ts
-const systemBlock = {
-  type: 'text' as const,
-  text: buildSystemPrompt(subject, medium, markingSchemeText),
-  cache_control: { type: 'ephemeral' as const },  // ← REQUIRED
-};
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+export const markingOutputFormat = zodOutputFormat(markingResultSchema);
+// Used as: output_config: { format: markingOutputFormat }
 ```
 
-Cache TTL is 5 minutes — all papers in one batch MUST be dispatched in a single Batch API call within this window.
+### 3. Batch API + Direct Streaming
+- **≤10 papers**: Direct streaming via `anthropic.messages.stream()` + `stream.finalMessage()`. Streaming is required by the SDK for requests that may take >10 minutes (large PDFs + high max_tokens).
+- **>10 papers**: Batch API via `anthropic.beta.messages.batches.create()`. 50% discount on top of caching.
 
-### 2. Batch API
-All bulk marking jobs use `anthropic.beta.messages.batches.create()`. This gives 50% discount on top of caching. Never use standard `messages.create()` for marking jobs.
+### Max Output Tokens
+`MAX_OUTPUT_TOKENS = 32000` — set high for Sinhala/Tamil which use ~2-3x more tokens than English.
 
 ---
 
@@ -38,10 +43,10 @@ The system prompt (cached) contains:
 1. Role: "You are an expert Sri Lankan A/L {subject} examiner"
 2. Marking scheme full text (parsed from PDF or RAG-retrieved chunks)
 3. Language instruction (see below)
-4. Output format (strict JSON)
+4. Marking guidance (no JSON format — structured outputs handle that)
 
 The user message (per student, variable) contains:
-1. Array of base64 PNG images (one per PDF page)
+1. Native PDF document block (`type: 'document'`, `media_type: 'application/pdf'`, base64-encoded)
 2. Instruction to mark the paper
 
 ### Language Instructions by Medium
@@ -66,7 +71,8 @@ const LANGUAGE_INSTRUCTIONS = {
 ```
 
 ### Required JSON Output Schema
-Claude must return this exact shape (enforce with schema in prompt):
+Enforced via Zod schema + structured outputs (`output_config.format`). No JSON examples in prompt needed.
+`ocr_confidence` is `z.enum(['high', 'low'])` — matches DB CHECK constraint. `saveMarkingResults` also sanitizes as defense-in-depth.
 ```json
 {
   "questions": [
@@ -114,72 +120,53 @@ The `match_marking_criteria` Postgres function uses `<=>` cosine distance on the
 
 ## Batch Dispatcher (lib/ai/batch-dispatcher.ts) — IMPLEMENTED
 
-Two exported functions: `dispatchMarkingBatch` and `pollBatchResults`.
+### Two-Phase Dispatch Pattern
 
-### `dispatchMarkingBatch(batchId, tutorId)`
+The dispatch route uses a two-phase pattern for responsive UX:
 
-Critical: billing deduction happens BEFORE any Claude API call.
+1. **Phase 1 — `prepareMarking(batchId, tutorId)`** (awaited): Validates billing, deducts minutes, loads context. Errors are caught and returned to the client.
+2. **Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText)`** (fire-and-forget): Runs marking in background. The client gets `{ status: 'processing' }` immediately.
 
 ```typescript
-// Simplified flow — see lib/ai/batch-dispatcher.ts for full implementation
-export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
-  const batch = await getBatchById(batchId, tutorId);
-  const submissions = (await getSubmissionsByBatch(batchId)).filter(s => s.status === 'pending');
-  if (submissions.length === 0) throw new Error('no_pending_submissions');
-
-  await checkAndDeductMinutes(tutorId, submissions.length);  // billing FIRST
-  await updateBatchStatus(batchId, 'processing');
-
-  const scheme = await getMarkingSchemeById(batch.scheme_id);
-  const paper = await getQuestionPaperById(batch.paper_id, tutorId);
-  const subjectName = paper.subjects?.[0]?.name ?? 'General';
-  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, JSON.stringify(scheme.structure_json));
-
-  const requests = await Promise.all(submissions.map(async (sub) => {
-    const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
-    const pdfBase64 = pdfBuffer.toString('base64');
-    return {
-      custom_id: sub.id,
-      params: {
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
-        system: [{ type: 'text', text: systemPromptText, cache_control: { type: 'ephemeral' } }],
-        messages: [{ role: 'user', content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
-          { type: 'text', text: 'Mark this paper per the scheme. Return JSON only.' },
-        ]}],
-      },
-    };
-  }));
-
-  const batchJob = await anthropic.beta.messages.batches.create({ requests });
-  await updateBatchClaudeBatchId(batchId, batchJob.id);
-  return batchJob.id;
-}
+// app/api/batches/[id]/dispatch/route.ts
+const { pendingSubmissions, systemPromptText } = await prepareMarking(batchId, user.id);
+executeMarking(batchId, pendingSubmissions, systemPromptText).catch(console.error);
+return NextResponse.json({ status: 'processing' });
 ```
+
+### Dispatch Modes
+- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. Results saved immediately.
+- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. Results retrieved via polling.
+
+Both modes use `output_config: { format: markingOutputFormat }` for structured outputs and check `stop_reason === 'max_tokens'` before parsing.
 
 ### `pollBatchResults(batchId, tutorId)`
 
 ```typescript
 export async function pollBatchResults(batchId: string, tutorId: string): Promise<PollResult> {
   const batch = await getBatchById(batchId, tutorId);
-  if (!batch.claude_batch_id) throw new Error('batch_not_dispatched');
 
+  // Guard: don't re-process finalized batches
+  if (batch.status === 'completed' || batch.status === 'failed') {
+    return { status: batch.status, marked: batch.marked_papers, total: batch.total_papers };
+  }
+
+  // Direct marking (no Batch API) — return current DB status
+  if (!batch.claude_batch_id) {
+    if (batch.status === 'processing') {
+      return { status: 'processing', marked: batch.marked_papers, total: batch.total_papers };
+    }
+    throw new Error('batch_not_dispatched');
+  }
+
+  // Check Anthropic Batch API status
   const batchJob = await anthropic.beta.messages.batches.retrieve(batch.claude_batch_id);
   if (batchJob.processing_status !== 'ended') {
     return { status: 'processing', marked: batch.marked_papers, total: batch.total_papers };
   }
 
-  // Iterate async results, parse JSON, save to marking_results
-  const results = await anthropic.beta.messages.batches.results(batch.claude_batch_id);
-  for await (const result of results) {
-    // Parse text block → saveMarkingResults() → updateSubmissionStatus('marked')
-    // Failed results → updateSubmissionStatus('failed')
-  }
-
-  await updateBatchMarkedPapers(batchId, markedCount);
-  await updateBatchStatus(batchId, finalStatus);  // 'completed' or 'failed'
-  return { status: finalStatus, marked: markedCount, total: batch.total_papers };
+  // Iterate async results, parse JSON via Zod, save to marking_results
+  // ...
 }
 ```
 

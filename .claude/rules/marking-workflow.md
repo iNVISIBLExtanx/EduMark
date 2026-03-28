@@ -41,30 +41,36 @@ Used by `useSubmissions` hook in `BatchDetail.tsx` to display the submissions ta
 Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 
 ### Step 4: Dispatch to Claude
-`POST /api/batches/[id]/dispatch` → implemented in `lib/ai/batch-dispatcher.ts:dispatchMarkingBatch()`
+`POST /api/batches/[id]/dispatch` → uses two-phase dispatch pattern for responsive UX.
 
-Order of operations (billing BEFORE Claude):
+**Phase 1 — `prepareMarking(batchId, tutorId)`** (awaited by the route):
 1. `getBatchById(batchId, tutorId)` — verify ownership, get `paper_id`, `scheme_id`, `medium`
 2. `getSubmissionsByBatch(batchId)` — filter to `pending` submissions only
 3. `checkAndDeductMinutes(tutorId, pendingCount)` — billing gate BEFORE touching Claude
-4. `updateBatchStatus(batchId, 'processing')`
-5. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
-6. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
-7. `buildSystemPrompt(subject, medium, schemeText)` — cached system block
-8. For each submission: `getSubmissionPdfBuffer(pdf_url)` → `pdfBuffer.toString('base64')` → native PDF document block
-9. `anthropic.beta.messages.batches.create({ requests })` — single Batch API job, `custom_id = submission.id`
-10. `updateBatchClaudeBatchId(batchId, claudeBatchId)` + update each submission to `processing`
+4. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
+5. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
+6. `buildSystemPrompt(subject, medium, schemeText)` — cached system block
+7. Returns `{ batch, pendingSubmissions, systemPromptText }`
 
-The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, totalPapers)` before calling the dispatcher, returning 402 with `{ error, available, needed }` if insufficient.
+**Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText)`** (fire-and-forget):
+- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. `MAX_OUTPUT_TOKENS = 32000`. Results saved immediately via `saveMarkingResults()`.
+- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. 1-hour cache TTL. Results retrieved via polling.
+- Both paths use `output_config: { format: markingOutputFormat }` (structured outputs) and check `stop_reason === 'max_tokens'` before parsing.
+
+The route returns `{ status: 'processing' }` immediately after Phase 1 succeeds. Phase 2 errors are logged but don't affect the HTTP response.
+
+The dispatch route also checks `isActive(billing)` and `hasMinutes(billing, totalPapers)` before calling `prepareMarking`, returning 402 with `{ error, available, needed }` if insufficient.
 
 UI: `BatchDetail.tsx` shows a 'Mark Papers' button when `batch.status === 'pending'` and submissions exist. Dispatching is blocked with a 400 error if `batch.status !== 'pending'` (double-dispatch prevention). On 402 errors, an `UpgradeModal` is shown.
 
 ### Step 5: Poll & Store Results
 `GET /api/batches/[id]/poll` (called by `useBatchPolling` hook every 15s) → implemented in `lib/ai/batch-dispatcher.ts:pollBatchResults()`
 
-1. `getBatchById(batchId, tutorId)` — get `claude_batch_id` (throws if not dispatched)
-2. `anthropic.beta.messages.batches.retrieve(claudeBatchId)` — check status
-3. If `processing_status !== 'ended'`: return `{ status: 'processing', marked, total }`
+1. `getBatchById(batchId, tutorId)` — check status; if already completed/failed, return cached result
+2. If no `claude_batch_id` and status is `processing`: direct marking in progress, return DB status
+3. If no `claude_batch_id` and status is `pending`: throw `batch_not_dispatched`
+4. `anthropic.beta.messages.batches.retrieve(claudeBatchId)` — check Batch API status
+5. If `processing_status !== 'ended'`: return `{ status: 'processing', marked, total }`
 4. If `processing_status === 'ended'`:
    - Iterate `anthropic.beta.messages.batches.results(claudeBatchId)` (async iterable)
    - For each `succeeded` result: parse JSON → `saveMarkingResults(submissionId, parsed)` → `updateSubmissionStatus(submissionId, 'marked')`

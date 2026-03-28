@@ -39,7 +39,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   const [nameValue, setNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
 
-  const { results: pollData, isDone } = useBatchPolling(
+  const { pollData, isDone } = useBatchPolling(
     batchId,
     batch?.status === 'processing'
   );
@@ -69,8 +69,12 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     setDispatchError(null);
     setDispatching(true);
     try {
-      await apiFetch(`/api/batches/${batchId}/dispatch`, { method: 'POST' });
+      const res = await apiFetch<{ status: string }>(`/api/batches/${batchId}/dispatch`, { method: 'POST' });
       await mutate();
+      // Direct marking completes instantly — also refresh submissions
+      if (res.status === 'completed') {
+        await submissionsMutate();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Dispatch failed';
       try {
@@ -251,7 +255,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         <div className="flex items-center gap-2 text-blue-600" data-testid="processing-status">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span className="text-sm font-medium">
-            Marking {pollData?.results?.length ?? batch.marked_papers}/{batch.total_papers} papers...
+            Marking {pollData?.marked ?? batch.marked_papers}/{batch.total_papers} papers...
           </span>
         </div>
       )}
