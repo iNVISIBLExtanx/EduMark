@@ -44,18 +44,26 @@ Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 `POST /api/batches/[id]/dispatch` → uses two-phase dispatch pattern for responsive UX.
 
 **Phase 1 — `prepareMarking(batchId, tutorId)`** (awaited by the route):
-1. `getBatchById(batchId, tutorId)` — verify ownership, get `paper_id`, `scheme_id`, `medium`
+1. `getBatchById(batchId, tutorId)` — verify ownership, get `paper_id`, `scheme_id`, `medium`, `paper_name`
 2. `getSubmissionsByBatch(batchId)` — filter to `pending` submissions only
 3. `checkAndDeductMinutes(tutorId, pendingCount)` — billing gate BEFORE touching Claude
 4. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
 5. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
-6. `buildSystemPrompt(subject, medium, schemeText)` — cached system block
-7. Returns `{ batch, pendingSubmissions, systemPromptText }`
+6. `buildSystemPrompt(subject, medium, schemeText, paperName)` — XML-structured, subject-aware cached system block
+7. Returns `{ batch, pendingSubmissions, systemPromptText, subject, paperName }`
 
-**Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText)`** (fire-and-forget):
-- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. `MAX_OUTPUT_TOKENS = 32000`. Results saved immediately via `saveMarkingResults()`.
-- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. 1-hour cache TTL. Results retrieved via polling.
+**Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText, subject, paperName?)`** (fire-and-forget):
+- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. `MAX_OUTPUT_TOKENS = 32000`. User message uses `buildUserMessageText(subject, paperName)` alongside native PDF document block. Results saved immediately via `saveMarkingResults()`.
+- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. 1-hour cache TTL. Same user message text. Results retrieved via polling.
 - Both paths use `output_config: { format: markingOutputFormat }` (structured outputs) and check `stop_reason === 'max_tokens'` before parsing.
+
+**Dispatch route also accepts `paper_name`** from request body:
+```typescript
+const body = await req.json().catch(() => ({}));
+const paperName: string | undefined = body.paper_name;
+if (paperName) await updateBatchPaperName(batchId, user.id, paperName);
+```
+This allows the UI to specify `'Pure (Paper I)'` or `'Applied (Paper II)'` for Combined Maths at dispatch time.
 
 The route returns `{ status: 'processing' }` immediately after Phase 1 succeeds. Phase 2 errors are logged but don't affect the HTTP response.
 
@@ -91,9 +99,9 @@ Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 ### Step 6: Tutor Review
 Tutor reviews batch results via expandable rows in `BatchDetail.tsx`:
 - Each marked submission has a "View Results" button that expands `SubmissionResultsPanel.tsx`
-- `GET /api/batches/[id]/results` retrieves all marking results for the batch
-- `SubmissionResultsPanel` renders `MarkingSummary` (total + override-adjusted marks) and `QuestionFeedbackCard` per question
-- `QuestionFeedbackCard` shows: question number, student answer (OCR), AI-awarded marks, feedback, with language-aware fonts
+- `GET /api/submissions/[id]` returns `{ results: MarkingResultRow[], summary: SubmissionSummary }` — consumed by `useMarkingResults` hook
+- `SubmissionResultsPanel` uses `summary.total_awarded` / `summary.total_max` for `MarkingSummary`; falls back to local computation if summary is null (backward compat)
+- `QuestionFeedbackCard` shows: Part A/B badge (when `part` is set), question number, student answer (OCR), AI-awarded marks, feedback (language-aware fonts), sub-question breakdown table (when `sub_questions` is present), OCR confidence badge
 - Tutor can click "Edit" on any question to override marks and feedback
 - `PATCH /api/submissions/[id]/override` saves `result_id`, `override_marks`, `override_feedback` to `marking_results`
 - Override display: "Edited" badge, override values shown instead of AI values, `MarkingSummary` shows "Includes tutor adjustments"

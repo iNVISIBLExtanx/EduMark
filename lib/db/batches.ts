@@ -15,7 +15,7 @@ export async function getBatchById(batchId: string, tutorId: string) {
   const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('batches')
-    .select('id, name, status, medium, total_papers, marked_papers, created_at, paper_id, scheme_id, claude_batch_id')
+    .select('id, name, status, medium, total_papers, marked_papers, created_at, paper_id, scheme_id, claude_batch_id, paper_name')
     .eq('id', batchId)
     .eq('tutor_id', tutorId)
     .single();
@@ -90,5 +90,15 @@ export async function updateBatchMarkedPapers(batchId: string, markedPapers: num
     .from('batches')
     .update({ marked_papers: markedPapers })
     .eq('id', batchId);
+  if (error) throw error;
+}
+
+export async function updateBatchPaperName(batchId: string, tutorId: string, paperName: string) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('batches')
+    .update({ paper_name: paperName })
+    .eq('id', batchId)
+    .eq('tutor_id', tutorId);
   if (error) throw error;
 }

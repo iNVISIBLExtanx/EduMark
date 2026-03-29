@@ -13,17 +13,23 @@ vi.mock('@/lib/supabase/server', () => ({
   createServerClient: vi.fn(async () => mockSupabaseClient),
 }));
 
+// saveMarkingResults uses the service role client (background job)
+vi.mock('@/lib/supabase/service', () => ({
+  createServiceRoleClient: vi.fn(() => mockSupabaseClient),
+}));
+
 vi.mock('@/lib/ai/mark-paper', () => ({}));
 
 import { getMarkingResultsByBatch, updateMarkingOverride, saveMarkingResults } from '@/lib/db/marking-results';
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mockSupabaseClient.from.mockReturnThis();
   mockSupabaseClient.select.mockReturnThis();
   mockSupabaseClient.eq.mockReturnThis();
   mockSupabaseClient.order.mockReturnThis();
   mockSupabaseClient.update.mockReturnThis();
+  mockSupabaseClient.insert.mockReturnThis();
 });
 
 describe('getMarkingResultsByBatch', () => {
@@ -56,9 +62,15 @@ describe('getMarkingResultsByBatch', () => {
     expect(results).toEqual([]);
   });
 
-  it('selects correct columns with inner join', async () => {
+  it('selects correct columns including part and sub_questions', async () => {
     setupOrderChain({ data: [], error: null });
     await getMarkingResultsByBatch('batch-1');
+    expect(mockSupabaseClient.select).toHaveBeenCalledWith(
+      expect.stringContaining('part')
+    );
+    expect(mockSupabaseClient.select).toHaveBeenCalledWith(
+      expect.stringContaining('sub_questions')
+    );
     expect(mockSupabaseClient.select).toHaveBeenCalledWith(
       expect.stringContaining('submissions!inner(batch_id)')
     );
@@ -106,13 +118,18 @@ describe('updateMarkingOverride', () => {
 });
 
 describe('saveMarkingResults', () => {
-  function setupInsertChain(resolvedValue: { error: unknown }) {
-    mockSupabaseClient.insert.mockResolvedValueOnce(resolvedValue);
+  // saveMarkingResults: insert into marking_results, then update submissions
+  function setupSaveChain(insertError: unknown = null, updateError: unknown = null) {
+    mockSupabaseClient.insert.mockResolvedValueOnce({ error: insertError });
+    // update().eq() for submissions table
+    mockSupabaseClient.eq.mockResolvedValueOnce({ error: updateError });
   }
 
   const validResult = {
+    paper_name: 'Paper II (Essay)',
     questions: [
       {
+        part: 'Part A',
         question_no: 1,
         max_marks: 10,
         awarded_marks: 7,
@@ -126,8 +143,8 @@ describe('saveMarkingResults', () => {
     general_feedback: 'Well done',
   };
 
-  it('inserts marking result rows into marking_results table', async () => {
-    setupInsertChain({ error: null });
+  it('inserts marking result rows with part and sub_questions', async () => {
+    setupSaveChain();
 
     await saveMarkingResults('sub-1', validResult);
 
@@ -135,17 +152,66 @@ describe('saveMarkingResults', () => {
     expect(mockSupabaseClient.insert).toHaveBeenCalledWith([
       expect.objectContaining({
         submission_id: 'sub-1',
-        question_no: 1,
-        max_marks: 10,
+        part:          'Part A',
+        question_no:   1,
+        max_marks:     10,
         awarded_marks: 7,
-        feedback: 'Good',
+        feedback:      'Good',
         ocr_confidence: 'high',
+        sub_questions: null,
       }),
     ]);
   });
 
+  it('saves batch-level summary to submissions table', async () => {
+    setupSaveChain();
+
+    await saveMarkingResults('sub-1', validResult);
+
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('submissions');
+    expect(mockSupabaseClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status:           'marked',
+        total_awarded:    7,
+        total_max:        10,
+        general_feedback: 'Well done',
+        paper_name:       'Paper II (Essay)',
+      })
+    );
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'sub-1');
+  });
+
+  it('saves best_questions_selected when present', async () => {
+    setupSaveChain();
+    const resultWithBestQ = { ...validResult, best_questions_selected: [1, 3, 5] };
+
+    await saveMarkingResults('sub-1', resultWithBestQ);
+
+    expect(mockSupabaseClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({ best_questions_selected: [1, 3, 5] })
+    );
+  });
+
+  it('saves sub_questions jsonb when present', async () => {
+    setupSaveChain();
+    const resultWithSub = {
+      ...validResult,
+      questions: [{
+        ...validResult.questions[0],
+        sub_questions: [{ label: '(a)', max_marks: 3, awarded_marks: 2, feedback: 'Ok' }],
+      }],
+    };
+
+    await saveMarkingResults('sub-1', resultWithSub);
+
+    const insertedRows = mockSupabaseClient.insert.mock.calls[0][0];
+    expect(insertedRows[0].sub_questions).toEqual([
+      { label: '(a)', max_marks: 3, awarded_marks: 2, feedback: 'Ok' },
+    ]);
+  });
+
   it('sanitizes ocr_confidence "medium" to "low"', async () => {
-    setupInsertChain({ error: null });
+    setupSaveChain();
     const resultWithMedium = {
       ...validResult,
       questions: [{
@@ -161,7 +227,7 @@ describe('saveMarkingResults', () => {
   });
 
   it('sanitizes any non-high ocr_confidence to "low"', async () => {
-    setupInsertChain({ error: null });
+    setupSaveChain();
     const resultWithUnknown = {
       ...validResult,
       questions: [{
@@ -177,7 +243,7 @@ describe('saveMarkingResults', () => {
   });
 
   it('keeps ocr_confidence "high" as "high"', async () => {
-    setupInsertChain({ error: null });
+    setupSaveChain();
 
     await saveMarkingResults('sub-1', validResult);
 
@@ -186,9 +252,15 @@ describe('saveMarkingResults', () => {
   });
 
   it('throws on insert error', async () => {
-    setupInsertChain({ error: { message: 'Insert failed' } });
+    setupSaveChain({ message: 'Insert failed' });
 
     await expect(saveMarkingResults('sub-1', validResult)).rejects.toEqual({ message: 'Insert failed' });
+  });
+
+  it('throws on submissions update error', async () => {
+    setupSaveChain(null, { message: 'Update failed' });
+
+    await expect(saveMarkingResults('sub-1', validResult)).rejects.toEqual({ message: 'Update failed' });
   });
 });
 

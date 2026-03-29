@@ -19,8 +19,10 @@ vi.mock('@/lib/billing/gate', async (importOriginal) => {
 });
 
 const mockGetBatchById = vi.fn();
+const mockUpdateBatchPaperName = vi.fn();
 vi.mock('@/lib/db/batches', () => ({
   getBatchById: (...args: unknown[]) => mockGetBatchById(...args),
+  updateBatchPaperName: (...args: unknown[]) => mockUpdateBatchPaperName(...args),
 }));
 
 const mockPrepareMarking = vi.fn();
@@ -77,7 +79,10 @@ describe('POST /api/batches/[id]/dispatch', () => {
       batch: makeBatch(),
       pendingSubmissions: [{ id: 'sub-1', pdf_url: 'test.pdf' }],
       systemPromptText: 'system prompt',
+      subject: 'Physics',
+      paperName: undefined,
     });
+    mockUpdateBatchPaperName.mockResolvedValue(undefined);
     mockExecuteMarking.mockResolvedValue('direct');
   });
 
@@ -185,7 +190,27 @@ describe('POST /api/batches/[id]/dispatch', () => {
       BATCH_ID,
       [{ id: 'sub-1', pdf_url: 'test.pdf' }],
       'system prompt',
+      'Physics',
+      undefined,
     );
+  });
+
+  it('stores paper_name on batch when provided in body', async () => {
+    const req = new Request('http://localhost/api/batches/test/dispatch', {
+      method: 'POST',
+      body: JSON.stringify({ paper_name: 'Pure (Paper I)' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await POST(req, makeParams());
+
+    expect(mockUpdateBatchPaperName).toHaveBeenCalledWith(BATCH_ID, TEST_USER.id, 'Pure (Paper I)');
+  });
+
+  it('does not call updateBatchPaperName when paper_name not in body', async () => {
+    await POST(makeRequest(), makeParams());
+
+    expect(mockUpdateBatchPaperName).not.toHaveBeenCalled();
   });
 
   it('returns 400 when prepareMarking throws no_pending_submissions', async () => {

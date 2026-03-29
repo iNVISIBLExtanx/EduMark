@@ -794,18 +794,19 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
       const prompt = buildSystemPrompt('Physics', 'sinhala', markingSchemeText);
 
       // Verify prompt contains all critical parts
-      expect(prompt).toContain('expert Sri Lankan A/L Physics examiner');
+      expect(prompt).toContain('expert Sri Lanka G.C.E. Advanced Level Physics examiner');
       expect(prompt).toContain('සිංහල'); // Sinhala script in language instruction
       expect(prompt).toContain('F = ma'); // RAG-retrieved content
       expect(prompt).toContain('Conservation of energy'); // RAG-retrieved content
-      expect(prompt).toContain('question number');
-      expect(prompt).toContain('OCR confidence');
+      expect(prompt).toContain('best_questions_selected');
+      expect(prompt).toContain('ocr_confidence');
     });
 
     it('uses English instructions for English medium', () => {
       const prompt = buildSystemPrompt('Chemistry', 'english', 'Test scheme text');
 
-      expect(prompt).toContain('Generate ALL feedback in English');
+      expect(prompt).toContain('Generate ALL feedback');
+      expect(prompt).toContain('in English');
       expect(prompt).not.toContain('සිංහල');
       expect(prompt).not.toContain('தமிழ்');
     });
@@ -969,7 +970,9 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
   // ─── Step 10: Dispatch batch to Claude ──────────────────────
   describe('Step 10: Dispatch batch to Claude Batch API', () => {
     const MOCK_MARKING_RESULT_DISPATCH = {
+      paper_name: 'Physics Paper I',
       questions: [{
+        part: '',
         question_no: 1,
         max_marks: 10,
         awarded_marks: 7,
@@ -1129,8 +1132,10 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
   // ─── Step 12: Poll batch results (completed) ──────────────
   describe('Step 12: Poll batch results when completed', () => {
     const MOCK_MARKING_RESULT = {
+      paper_name: 'Physics Paper I',
       questions: [
         {
+          part: '',
           question_no: 1,
           max_marks: 10,
           awarded_marks: 7,
@@ -1139,6 +1144,7 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
           ocr_confidence: 'high' as const,
         },
         {
+          part: '',
           question_no: 2,
           max_marks: 15,
           awarded_marks: 12,
@@ -2103,7 +2109,8 @@ describe('Phase 12: Edge cases & error paths', () => {
             content: [{
               type: 'text',
               text: JSON.stringify({
-                questions: [{ question_no: 1, max_marks: 10, awarded_marks: 8, student_answer_text: 'ans', feedback: 'good', ocr_confidence: 'high' }],
+                paper_name: 'Physics Paper I',
+                questions: [{ part: '', question_no: 1, max_marks: 10, awarded_marks: 8, student_answer_text: 'ans', feedback: 'good', ocr_confidence: 'high' }],
                 total_awarded: 8, total_max: 10, general_feedback: 'Well done',
               }),
             }],

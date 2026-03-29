@@ -1,5 +1,5 @@
 import { anthropic } from './claude-client';
-import { buildSystemPrompt, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
+import { buildSystemPrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
 import { getBatchById, updateBatchStatus, updateBatchClaudeBatchId, updateBatchMarkedPapers } from '@/lib/db/batches';
 import { getSubmissionsByBatch, updateSubmissionStatus, getSubmissionPdfBuffer } from '@/lib/db/submissions';
 import { getMarkingSchemeById } from '@/lib/db/marking-schemes';
@@ -33,9 +33,10 @@ async function loadMarkingContext(batchId: string, tutorId: string) {
   const paper = await getQuestionPaperById(batch.paper_id, tutorId);
   const subjects = (paper as unknown as { subjects?: { name: string }[] }).subjects;
   const subjectName = subjects?.[0]?.name ?? 'General';
-  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText);
+  const paperName: string | undefined = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
+  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText, paperName);
 
-  return { batch, pendingSubmissions, systemPromptText };
+  return { batch, pendingSubmissions, systemPromptText, subject: subjectName, paperName };
 }
 
 /**
@@ -54,11 +55,13 @@ export async function executeMarking(
   batchId: string,
   pendingSubmissions: { id: string; pdf_url: string }[],
   systemPromptText: string,
+  subject: string,
+  paperName?: string,
 ): Promise<string> {
   if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
-    return dispatchDirect(batchId, pendingSubmissions, systemPromptText);
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
   }
-  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText);
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
 }
 
 /**
@@ -66,13 +69,13 @@ export async function executeMarking(
  * Kept for backward compatibility (tests, etc). Awaits full completion.
  */
 export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
-  const { pendingSubmissions, systemPromptText } = await loadMarkingContext(batchId, tutorId);
+  const { pendingSubmissions, systemPromptText, subject, paperName } = await loadMarkingContext(batchId, tutorId);
 
   if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
-    return dispatchDirect(batchId, pendingSubmissions, systemPromptText);
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
   }
 
-  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText);
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
 }
 
 /**
@@ -84,6 +87,8 @@ async function dispatchDirect(
   batchId: string,
   pendingSubmissions: { id: string; pdf_url: string }[],
   systemPromptText: string,
+  subject: string,
+  paperName?: string,
 ): Promise<string> {
   await updateBatchStatus(batchId, 'processing');
 
@@ -123,7 +128,7 @@ async function dispatchDirect(
               },
               {
                 type: 'text' as const,
-                text: 'Mark this paper per the scheme.',
+                text: buildUserMessageText(subject, paperName),
               },
             ],
           },
@@ -180,6 +185,8 @@ async function dispatchBatchAPI(
   batchId: string,
   pendingSubmissions: { id: string; pdf_url: string }[],
   systemPromptText: string,
+  subject: string,
+  paperName?: string,
 ): Promise<string> {
   const requests = await Promise.all(
     pendingSubmissions.map(async (sub) => {
@@ -212,7 +219,7 @@ async function dispatchBatchAPI(
                 },
                 {
                   type: 'text' as const,
-                  text: 'Mark this paper per the scheme.',
+                  text: buildUserMessageText(subject, paperName),
                 },
               ],
             },

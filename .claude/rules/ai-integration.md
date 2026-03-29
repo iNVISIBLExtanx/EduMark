@@ -39,57 +39,79 @@ export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 
 ## Marking Prompt Structure
 
-The system prompt (cached) contains:
-1. Role: "You are an expert Sri Lankan A/L {subject} examiner"
-2. Marking scheme full text (parsed from PDF or RAG-retrieved chunks)
-3. Language instruction (see below)
-4. Marking guidance (no JSON format — structured outputs handle that)
+### System Prompt (cached) — `buildSystemPrompt(subject, medium, schemeText, paperName?)`
+XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
+1. Role: "You are an expert Sri Lanka G.C.E. Advanced Level {subject} examiner"
+2. `<language_rules>` — language-specific feedback instructions (see below)
+3. `<marking_rules>` — 12 explicit rules (read full paper first, Part A/B identification, BEST-N selection, sub-questions, OCR confidence, no hallucination, etc.)
+4. `<paper_structure subject="...">` — generated from `SUBJECT_CONFIGS` (see below)
+5. `<marking_scheme>` — full scheme text from `structure_json`
 
-The user message (per student, variable) contains:
-1. Native PDF document block (`type: 'document'`, `media_type: 'application/pdf'`, base64-encoded)
-2. Instruction to mark the paper
+### Subject Configs (`SUBJECT_CONFIGS` in `lib/ai/mark-paper.ts`)
+6 subjects with per-paper structure awareness:
+
+| Subject | Part A | Part B |
+|---------|--------|--------|
+| Combined Maths | 10 questions, ALL compulsory, 25 marks each | 7 questions, answer BEST 5, 150 marks each |
+| Physics | 50 MCQ | 6 structured essay questions, attempt all |
+| Chemistry | Part A MCQ + structured | Part B essay |
+| Biology | Part A compulsory | Part B optional questions |
+| Economics | Section A + B | — |
+| Business Studies | Section A + B | — |
+
+`paperName` (e.g. `'Pure (Paper I)'`, `'Applied (Paper II)'`) is passed as optional 4th arg to refine the `<paper_structure>` block for Combined Maths.
+
+### User Message — `buildUserMessageText(subject, paperName?)`
+Returns 7-step instruction text used alongside the native PDF document block:
+```
+Step 1: Scan all pages and identify all question numbers attempted.
+Step 2: Transcribe each student answer into student_answer_text.
+Step 3: Compare against marking scheme criteria.
+Step 4: Award marks per sub-section, summing for the question total.
+Step 5: Apply best-N selection rule if applicable (Part B).
+Step 6: Write specific feedback per question citing the criterion awarded or missed.
+Step 7: Complete the JSON output with all required fields.
+```
+**Note**: This function only returns text. The caller (`batch-dispatcher.ts`) wraps it alongside the native PDF document block — no image conversion.
 
 ### Language Instructions by Medium
 ```typescript
 const LANGUAGE_INSTRUCTIONS = {
-  sinhala: `
-    Read the handwritten answers carefully. The student has written in Sinhala.
-    Use the marking scheme context to guide your interpretation of ambiguous characters.
-    Generate ALL feedback text in Sinhala Unicode script (සිංහල).
-    If handwriting is unclear, set ocr_confidence to "low".
-  `,
-  tamil: `
-    Read the handwritten answers carefully. The student has written in Tamil.
-    Use the marking scheme context to guide your interpretation of ambiguous characters.
-    Generate ALL feedback text in Tamil script (தமிழ்).
-    If handwriting is unclear, set ocr_confidence to "low".
-  `,
-  english: `
-    Read the handwritten answers carefully. Generate ALL feedback in English.
-  `,
+  sinhala: `Generate ALL feedback in Sinhala Unicode script (සිංහල). Set ocr_confidence to "low" if unclear.`,
+  tamil:   `Generate ALL feedback in Tamil script (தமிழ்). Set ocr_confidence to "low" if unclear.`,
+  english: `Generate ALL feedback in English. Set ocr_confidence to "low" if unclear.`,
 };
 ```
 
-### Required JSON Output Schema
+### Required JSON Output Schema (`markingResultSchema`)
 Enforced via Zod schema + structured outputs (`output_config.format`). No JSON examples in prompt needed.
 `ocr_confidence` is `z.enum(['high', 'low'])` — matches DB CHECK constraint. `saveMarkingResults` also sanitizes as defense-in-depth.
 ```json
 {
+  "paper_name": "Pure (Paper I)",
   "questions": [
     {
+      "part": "Part A",
       "question_no": 1,
       "max_marks": 10,
       "awarded_marks": 7,
       "student_answer_text": "...",
       "feedback": "...",
-      "ocr_confidence": "high"
+      "ocr_confidence": "high",
+      "sub_questions": [
+        { "label": "(a)(i)", "max_marks": 4, "awarded_marks": 3, "feedback": "..." }
+      ]
     }
   ],
+  "best_questions_selected": [1, 3, 5, 6, 7],
   "total_awarded": 7,
   "total_max": 10,
   "general_feedback": "..."
 }
 ```
+- `part`: required string (empty string `''` for subjects with no part structure)
+- `sub_questions`: optional array for sub-part breakdowns like `(a)(i)`, `(a)(ii)`
+- `best_questions_selected`: optional array of question numbers chosen in BEST-N selection (Combined Maths Part B)
 
 ---
 
@@ -124,13 +146,13 @@ The `match_marking_criteria` Postgres function uses `<=>` cosine distance on the
 
 The dispatch route uses a two-phase pattern for responsive UX:
 
-1. **Phase 1 — `prepareMarking(batchId, tutorId)`** (awaited): Validates billing, deducts minutes, loads context. Errors are caught and returned to the client.
-2. **Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText)`** (fire-and-forget): Runs marking in background. The client gets `{ status: 'processing' }` immediately.
+1. **Phase 1 — `prepareMarking(batchId, tutorId)`** (awaited): Validates billing, deducts minutes, loads context. Returns `{ batch, pendingSubmissions, systemPromptText, subject, paperName }`. Errors are caught and returned to the client.
+2. **Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText, subject, paperName?)`** (fire-and-forget): Runs marking in background. The client gets `{ status: 'processing' }` immediately.
 
 ```typescript
 // app/api/batches/[id]/dispatch/route.ts
-const { pendingSubmissions, systemPromptText } = await prepareMarking(batchId, user.id);
-executeMarking(batchId, pendingSubmissions, systemPromptText).catch(console.error);
+const { pendingSubmissions, systemPromptText, subject, paperName } = await prepareMarking(batchId, user.id);
+executeMarking(batchId, pendingSubmissions, systemPromptText, subject, paperName).catch(console.error);
 return NextResponse.json({ status: 'processing' });
 ```
 

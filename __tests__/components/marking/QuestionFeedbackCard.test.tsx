@@ -12,12 +12,14 @@ const mockApiFetch = apiFetch as ReturnType<typeof vi.fn>;
 const defaultProps = {
   id: 'r1',
   submissionId: 's1',
+  part: 'Part A' as string | null,
   questionNo: 1,
   maxMarks: 10,
   awardedMarks: 7,
   feedback: 'Good attempt at explaining photosynthesis.',
   studentAnswerText: 'Photosynthesis is the process by which plants make food.',
   ocrConfidence: 'high' as const,
+  subQuestions: null as { label: string; max_marks: number; awarded_marks: number; feedback: string }[] | null,
   tutorOverride: false,
   overrideMarks: null as number | null,
   overrideFeedback: null as string | null,
@@ -46,6 +48,22 @@ describe('QuestionFeedbackCard', () => {
     expect(screen.getByText(/Photosynthesis is the process/)).toBeInTheDocument();
   });
 
+  it('shows part badge when part is provided', () => {
+    render(<QuestionFeedbackCard {...defaultProps} part="Part A" />);
+    expect(screen.getByText('Part A')).toBeInTheDocument();
+  });
+
+  it('shows Part B badge for Part B questions', () => {
+    render(<QuestionFeedbackCard {...defaultProps} part="Part B" />);
+    expect(screen.getByText('Part B')).toBeInTheDocument();
+  });
+
+  it('does not render part badge when part is null', () => {
+    render(<QuestionFeedbackCard {...defaultProps} part={null} />);
+    expect(screen.queryByText('Part A')).not.toBeInTheDocument();
+    expect(screen.queryByText('Part B')).not.toBeInTheDocument();
+  });
+
   it('shows low OCR confidence badge when confidence is low', () => {
     render(<QuestionFeedbackCard {...defaultProps} ocrConfidence="low" />);
     expect(screen.getByText('Low OCR confidence')).toBeInTheDocument();
@@ -64,6 +82,29 @@ describe('QuestionFeedbackCard', () => {
   it('displays override marks when tutorOverride is true', () => {
     render(<QuestionFeedbackCard {...defaultProps} tutorOverride={true} overrideMarks={9} overrideFeedback="Excellent" />);
     expect(screen.getByText('9/10')).toBeInTheDocument();
+  });
+
+  it('renders sub-question breakdown when sub_questions are provided', () => {
+    const subQuestions = [
+      { label: '(a)(i)', max_marks: 3, awarded_marks: 2, feedback: 'Partial credit' },
+      { label: '(a)(ii)', max_marks: 4, awarded_marks: 4, feedback: 'Full marks' },
+    ];
+    render(<QuestionFeedbackCard {...defaultProps} subQuestions={subQuestions} />);
+    expect(screen.getByText('(a)(i)')).toBeInTheDocument();
+    expect(screen.getByText('2/3')).toBeInTheDocument();
+    expect(screen.getByText('Partial credit')).toBeInTheDocument();
+    expect(screen.getByText('(a)(ii)')).toBeInTheDocument();
+    expect(screen.getByText('4/4')).toBeInTheDocument();
+  });
+
+  it('does not render sub-question section when sub_questions is null', () => {
+    render(<QuestionFeedbackCard {...defaultProps} subQuestions={null} />);
+    expect(screen.queryByText('Sub-question Breakdown')).not.toBeInTheDocument();
+  });
+
+  it('does not render sub-question section when sub_questions is empty array', () => {
+    render(<QuestionFeedbackCard {...defaultProps} subQuestions={[]} />);
+    expect(screen.queryByText('Sub-question Breakdown')).not.toBeInTheDocument();
   });
 
   it('enters edit mode when edit button is clicked', () => {
