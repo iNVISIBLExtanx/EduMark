@@ -11,8 +11,10 @@ const CLAUDE_BATCH_ID = 'msgbatch_abc123';
 
 // --- Mock marking result ---
 const MOCK_MARKING_RESULT = {
+  paper_name: 'Paper II (Essay)',
   questions: [
     {
+      part: 'Part A',
       question_no: 1,
       max_marks: 10,
       awarded_marks: 7,
@@ -74,6 +76,7 @@ vi.mock('@/lib/db/marking-results', () => ({
 }));
 
 const mockBuildSystemPrompt = vi.fn();
+const mockBuildUserMessageText = vi.fn();
 const mockMarkingOutputFormat = { type: 'json_schema', schema: {} };
 const mockMarkingResultSchema = {
   parse: vi.fn((val: unknown) => val),
@@ -81,6 +84,7 @@ const mockMarkingResultSchema = {
 
 vi.mock('@/lib/ai/mark-paper', () => ({
   buildSystemPrompt: (...args: unknown[]) => mockBuildSystemPrompt(...args),
+  buildUserMessageText: (...args: unknown[]) => mockBuildUserMessageText(...args),
   markingOutputFormat: { type: 'json_schema', schema: {} },
   markingResultSchema: { parse: (val: unknown) => mockMarkingResultSchema.parse(val) },
 }));
@@ -123,6 +127,7 @@ function makeBatch(overrides = {}) {
     claude_batch_id: null,
     total_papers: 2,
     marked_papers: 0,
+    paper_name: null,
     ...overrides,
   };
 }
@@ -165,6 +170,7 @@ beforeEach(() => {
     subjects: [{ name: 'Physics' }],
   });
   mockBuildSystemPrompt.mockReturnValue('You are an expert examiner...');
+  mockBuildUserMessageText.mockReturnValue('mock 7-step marking instructions');
   mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
   mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
   mockMessagesStream.mockReturnValue({
@@ -230,6 +236,7 @@ describe('dispatchMarkingBatch', () => {
       'Physics',
       'english',
       JSON.stringify({ questions: [{ no: 1, marks: 10 }] }),
+      undefined,
     );
   });
 
@@ -244,7 +251,7 @@ describe('dispatchMarkingBatch', () => {
 
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
-    expect(mockBuildSystemPrompt).toHaveBeenCalledWith('Physics', 'english', '');
+    expect(mockBuildSystemPrompt).toHaveBeenCalledWith('Physics', 'english', '', undefined);
   });
 
   it('defaults subject name to General when paper has no subjects', async () => {
@@ -260,6 +267,7 @@ describe('dispatchMarkingBatch', () => {
       'General',
       expect.any(String),
       expect.any(String),
+      undefined,
     );
   });
 
@@ -475,14 +483,14 @@ describe('prepareMarking', () => {
 describe('executeMarking', () => {
   it('uses direct mode for ≤10 submissions', async () => {
     const subs = [{ id: SUBMISSION_ID_1, pdf_url: 'test.pdf' }, { id: SUBMISSION_ID_2, pdf_url: 'test2.pdf' }];
-    const result = await executeMarking(BATCH_ID, subs, 'system prompt');
+    const result = await executeMarking(BATCH_ID, subs, 'system prompt', 'Physics', undefined);
     expect(result).toBe('direct');
     expect(mockMessagesStream).toHaveBeenCalledTimes(2);
   });
 
   it('uses Batch API for >10 submissions', async () => {
     const subs = Array.from({ length: 11 }, (_, i) => ({ id: `sub-${i}`, pdf_url: `test-${i}.pdf` }));
-    const result = await executeMarking(BATCH_ID, subs, 'system prompt');
+    const result = await executeMarking(BATCH_ID, subs, 'system prompt', 'Physics', undefined);
     expect(result).toBe(CLAUDE_BATCH_ID);
     expect(mockBatchesCreate).toHaveBeenCalledTimes(1);
   });

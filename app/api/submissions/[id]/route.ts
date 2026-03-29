@@ -13,7 +13,17 @@ export async function GET(
 
   try {
     const results = await getMarkingResultsBySubmission(submissionId);
-    return NextResponse.json(results);
+
+    // Fetch submission-level summary (total_awarded, general_feedback, etc.)
+    const { data: submission, error: subError } = await supabase
+      .from('submissions')
+      .select('total_awarded, total_max, general_feedback, best_questions_selected, paper_name')
+      .eq('id', submissionId)
+      .single();
+
+    if (subError) throw subError;
+
+    return NextResponse.json({ results, summary: submission });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
