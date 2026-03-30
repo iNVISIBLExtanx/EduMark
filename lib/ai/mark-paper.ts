@@ -339,7 +339,7 @@ export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 // System prompt builder — specific, structured, unambiguous
 // ---------------------------------------------------------------------------
 
-function buildPartInstructions(subject: string): string {
+function buildPartInstructions(subject: string, paperName?: string): string {
   const config = SUBJECT_CONFIGS[subject];
   if (!config) {
     return `This is a general essay paper. Mark each question according to the marking scheme provided.`;
@@ -347,7 +347,13 @@ function buildPartInstructions(subject: string): string {
 
   const lines: string[] = [`<paper_structure subject="${subject}">`];
 
-  for (const paper of config.papers) {
+  // When paperName is specified, only include the matching paper's structure.
+  // This prevents the AI from being confused by multiple paper descriptions.
+  const papersToShow = paperName
+    ? config.papers.filter((p) => p.name === paperName)
+    : config.papers;
+
+  for (const paper of papersToShow) {
     lines.push(`  <paper name="${paper.name}">`);
     lines.push(`    <selection_rule>${paper.selection_rule}</selection_rule>`);
     for (const part of paper.parts) {
@@ -374,7 +380,7 @@ export function buildSystemPrompt(
   paperName?: string,
 ): string {
   const langInstructions = LANGUAGE_INSTRUCTIONS[medium] ?? LANGUAGE_INSTRUCTIONS.english;
-  const partInstructions = buildPartInstructions(subject);
+  const partInstructions = buildPartInstructions(subject, paperName);
 
   return `You are an expert Sri Lanka G.C.E. Advanced Level ${subject} examiner with 15+ years of marking experience.
 You are marking handwritten student answer scripts using an official tutor-provided marking scheme.

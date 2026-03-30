@@ -43,8 +43,8 @@ export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 1. Role: "You are an expert Sri Lanka G.C.E. Advanced Level {subject} examiner"
 2. `<language_rules>` — language-specific feedback instructions (see below)
-3. `<marking_rules>` — 12 explicit rules (read full paper first, Part A/B identification, BEST-N selection, sub-questions, OCR confidence, no hallucination, etc.)
-4. `<paper_structure subject="...">` — generated from `SUBJECT_CONFIGS` (see below)
+3. `<marking_rules>` — 14 explicit rules (read full paper first, Part A/B identification, BEST-N selection, sub-questions, OCR confidence, no hallucination, rule 13: all 10 Combined Maths Part A questions must appear, rule 14: max_marks must match paper structure)
+4. `<paper_structure subject="...">` — generated from `SUBJECT_CONFIGS` via `buildPartInstructions(subject, paperName)` (see below)
 5. `<marking_scheme>` — full scheme text from `structure_json`
 
 ### Subject Configs (`SUBJECT_CONFIGS` in `lib/ai/mark-paper.ts`)
@@ -63,7 +63,19 @@ XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 
 **`paper_name` is REQUIRED for Combined Maths dispatch.** If `paper_name` is not stored on the batch yet, `BatchDetail.tsx` prompts the tutor to select 'Pure (Paper I)' or 'Applied (Paper II)' before enabling the dispatch button. The selected value is sent as `paper_name` in the POST body to the dispatch route.
 
-`paperName` (e.g. `'Pure (Paper I)'`, `'Applied (Paper II)'`) is passed as optional 4th arg to refine the `<paper_structure>` block for Combined Maths.
+`paperName` (e.g. `'Pure (Paper I)'`, `'Applied (Paper II)'`) is passed as optional 4th arg. `buildSystemPrompt` passes it to `buildPartInstructions(subject, paperName)`, which **filters the `<paper_structure>` XML to only the matching paper** — preventing Claude from being confused by seeing both Pure I and Applied II structure simultaneously. Without `paperName`, all papers for the subject are emitted (backward-compatible for non-Combined-Maths subjects).
+
+**CRITICAL — Supabase FK join shape**: Supabase returns many-to-one FK joins as **single objects**, NOT arrays. `getQuestionPaperById` returns `subjects` as `{ name, code }`, not `[{ name, code }]`. Accessing `subjects?.[0]?.name` always returns `undefined`. Always use `subjects?.name`:
+```typescript
+// CORRECT — single-object FK join
+const subjects = (paper as unknown as { subjects?: { name: string } }).subjects;
+const subjectName = subjects?.name ?? 'General';
+
+// WRONG — [0] always undefined on Supabase many-to-one joins
+const subjects = (paper as unknown as { subjects?: { name: string }[] }).subjects;
+const subjectName = subjects?.[0]?.name ?? 'General';  // ← always 'General'!
+```
+This applies to ALL nested FK joins in Supabase responses. The same bug exists in `pollBatchResults` where `batch.question_papers?.subjects?.name` is the correct pattern (not `[0]?.subjects?.[0]?.name`).
 
 ### Post-Parse Sanitization — `sanitizeMarkingResult(result, subject)`
 

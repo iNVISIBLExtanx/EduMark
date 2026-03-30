@@ -134,3 +134,17 @@ export async function GET(req, { params }) {
 ```
 
 **Note**: `approveReport()` uses `upsert` (not `update`) with `onConflict: 'submission_id'` to handle the case where no report record exists yet. This prevents the chicken-and-egg problem where download checks for an approved report but no record exists.
+
+## Storage RLS Policy Requirements for `reports` Bucket
+
+The download route uploads the generated PDF via `supabase.storage.from('reports').upload(..., { upsert: true })`. Supabase storage upsert requires **both INSERT and UPDATE policies** — INSERT for the first upload, UPDATE for any subsequent re-download of the same report.
+
+Required RLS policies on `storage.objects` for the `reports` bucket:
+- `rep_select_own` — SELECT
+- `rep_insert_own` — INSERT
+- `rep_update_own` — UPDATE ← **required for upsert to work on re-download**
+- `rep_delete_own` — DELETE
+
+All policies scope by tutor: `(storage.foldername(name))[1] = auth.uid()::text`
+
+**Bug history**: The `rep_update_own` policy was missing, causing `POST 400` on second download of the same report. First download succeeded (INSERT); second failed (UPDATE denied). Migration `add_reports_storage_update_policy` added the missing policy.

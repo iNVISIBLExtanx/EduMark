@@ -163,11 +163,12 @@ beforeEach(() => {
     structure_json: { questions: [{ no: 1, marks: 10 }] },
     embeddings_done: true,
   });
+  // Supabase FK join returns a single object, NOT an array
   mockGetQuestionPaperById.mockResolvedValue({
     id: PAPER_ID,
     tutor_id: TUTOR_ID,
     title: 'Physics 2025',
-    subjects: [{ name: 'Physics' }],
+    subjects: { name: 'Physics' },
   });
   mockBuildSystemPrompt.mockReturnValue('You are an expert examiner...');
   mockBuildUserMessageText.mockReturnValue('mock 7-step marking instructions');
@@ -265,6 +266,25 @@ describe('dispatchMarkingBatch', () => {
 
     expect(mockBuildSystemPrompt).toHaveBeenCalledWith(
       'General',
+      expect.any(String),
+      expect.any(String),
+      undefined,
+    );
+  });
+
+  it('extracts subject name from Supabase single-object FK join (not array)', async () => {
+    // Supabase returns subjects as { name: 'Combined Maths' }, not [{ name: 'Combined Maths' }]
+    mockGetQuestionPaperById.mockResolvedValue({
+      id: PAPER_ID,
+      tutor_id: TUTOR_ID,
+      title: 'Combined Maths 2025',
+      subjects: { name: 'Combined Maths' },
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockBuildSystemPrompt).toHaveBeenCalledWith(
+      'Combined Maths',
       expect.any(String),
       expect.any(String),
       undefined,
@@ -797,6 +817,35 @@ describe('pollBatchResults', () => {
 
     expect(result).toEqual({ status: 'failed', marked: 0, total: 2 });
     expect(mockBatchesRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('extracts subject from single-object question_papers.subjects join in pollBatchResults', async () => {
+    // getBatchById returns question_papers as a single object (many-to-one FK), not an array
+    mockGetBatchById.mockResolvedValue({
+      ...makeBatch({ claude_batch_id: CLAUDE_BATCH_ID, total_papers: 1 }),
+      question_papers: { subjects: { name: 'Combined Maths' } },
+    });
+    mockBatchesRetrieve.mockResolvedValue({ processing_status: 'ended' });
+    mockBatchesResults.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield {
+          custom_id: SUBMISSION_ID_1,
+          result: {
+            type: 'succeeded',
+            message: {
+              stop_reason: 'end_turn',
+              content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
+            },
+          },
+        };
+      },
+    });
+
+    await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    // sanitizeMarkingResult is called with 'Combined Maths' (not 'General') —
+    // verified indirectly: saveMarkingResults is called (parse succeeded)
+    expect(mockSaveMarkingResults).toHaveBeenCalledTimes(1);
   });
 });
 

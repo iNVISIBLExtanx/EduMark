@@ -70,8 +70,9 @@ async function loadMarkingContext(batchId: string, tutorId: string) {
     ? JSON.stringify(scheme.structure_json)
     : '';
   const paper = await getQuestionPaperById(batch.paper_id, tutorId);
-  const subjects = (paper as unknown as { subjects?: { name: string }[] }).subjects;
-  const subjectName = subjects?.[0]?.name ?? 'General';
+  // Supabase returns the FK join as a single object (many-to-one), not an array
+  const subjects = (paper as unknown as { subjects?: { name: string } }).subjects;
+  const subjectName = subjects?.name ?? 'General';
   const paperName: string | undefined = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
   const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText, paperName);
 
@@ -377,8 +378,9 @@ export async function pollBatchResults(batchId: string, tutorId: string): Promis
           // With structured outputs, the response is guaranteed valid JSON
           // matching our schema (when not truncated). Zod parse adds safety.
           // sanitizeMarkingResult corrects wrong max_marks + recomputes BEST-5 for Combined Maths.
-          const batchSubject = (batch as unknown as { question_papers?: { subjects?: { name?: string }[] }[] })
-            .question_papers?.[0]?.subjects?.[0]?.name ?? 'General';
+          // Supabase returns FK joins as single objects (many-to-one), not arrays
+          const batchSubject = (batch as unknown as { question_papers?: { subjects?: { name?: string } } })
+            .question_papers?.subjects?.name ?? 'General';
           const parsed: MarkingResult = sanitizeMarkingResult(
             markingResultSchema.parse(JSON.parse(textBlock.text)),
             batchSubject,

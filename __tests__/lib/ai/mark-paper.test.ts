@@ -66,6 +66,18 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Applied (Paper II)');
   });
 
+  it('with paperName filters to only that paper in paper_structure', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('Pure (Paper I)');
+    expect(prompt).not.toContain('Applied (Paper II)');
+  });
+
+  it('without paperName includes all papers in paper_structure', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme);
+    expect(prompt).toContain('Pure (Paper I)');
+    expect(prompt).toContain('Applied (Paper II)');
+  });
+
   it('falls back to general essay instruction for unknown subject', () => {
     const prompt = buildSystemPrompt('Unknown Subject', 'english', scheme);
     expect(prompt).toContain('general essay paper');

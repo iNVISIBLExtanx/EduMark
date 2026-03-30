@@ -181,7 +181,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (773 tests, 56 files)
+## Current Test Coverage (777 tests, 56 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -196,8 +196,8 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/pdf/pdf-to-images.test.ts` | 5 | getPdfPageCount: page count, lightweight check, error handling |
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
-| `__tests__/lib/ai/mark-paper.test.ts` | 24 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13+14 present), buildUserMessageText (7 steps, paper label), markingResultSchema (paper_name, part, sub_questions, best_questions_selected), markingOutputFormat |
-| `__tests__/lib/ai/batch-dispatcher.test.ts` | 32 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback). Poll: result parsing, status updates, partial failures |
+| `__tests__/lib/ai/mark-paper.test.ts` | 26 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13+14 present, paperName filters to only matching paper, without paperName includes all papers), buildUserMessageText (7 steps, paper label), markingResultSchema (paper_name, part, sub_questions, best_questions_selected), markingOutputFormat |
+| `__tests__/lib/ai/batch-dispatcher.test.ts` | 34 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback), subject extracted from Supabase single-object FK join (not array). Poll: result parsing, status updates, partial failures, subject extracted from single-object question_papers.subjects join |
 | `__tests__/app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `__tests__/app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
 | `__tests__/app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |

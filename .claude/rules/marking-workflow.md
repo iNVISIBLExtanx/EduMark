@@ -48,8 +48,8 @@ Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 2. `getSubmissionsByBatch(batchId)` — filter to `pending` submissions only
 3. `checkAndDeductMinutes(tutorId, pendingCount)` — billing gate BEFORE touching Claude
 4. Load marking scheme `structure_json` via `getMarkingSchemeById(scheme_id)`
-5. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name
-6. `buildSystemPrompt(subject, medium, schemeText, paperName)` — XML-structured, subject-aware cached system block
+5. Load paper via `getQuestionPaperById(paper_id, tutorId)` to get subject name — Supabase returns `subjects` as a **single object** (not array); use `subjects?.name`, never `subjects?.[0]?.name`
+6. `buildSystemPrompt(subject, medium, schemeText, paperName)` — XML-structured, subject-aware cached system block; `paperName` is passed to `buildPartInstructions` to filter `<paper_structure>` to only the matching paper
 7. Returns `{ batch, pendingSubmissions, systemPromptText, subject, paperName }`
 
 **Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText, subject, paperName?)`** (fire-and-forget):
