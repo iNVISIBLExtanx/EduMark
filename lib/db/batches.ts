@@ -15,7 +15,7 @@ export async function getBatchById(batchId: string, tutorId: string) {
   const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('batches')
-    .select('id, name, status, medium, total_papers, marked_papers, created_at, paper_id, scheme_id, claude_batch_id, paper_name')
+    .select('id, name, status, medium, total_papers, marked_papers, created_at, paper_id, scheme_id, claude_batch_id, paper_name, question_papers(subjects(name))')
     .eq('id', batchId)
     .eq('tutor_id', tutorId)
     .single();

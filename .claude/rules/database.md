@@ -341,7 +341,7 @@ Rules:
 | Function | Description |
 |----------|-------------|
 | `getBatchesByTutor(tutorId)` | List batches for a tutor |
-| `getBatchById(batchId, tutorId)` | Get single batch including `paper_name` (ownership check via tutor_id) |
+| `getBatchById(batchId, tutorId)` | Get single batch including `paper_name` and nested `question_papers(subjects(name))` join for subject_name (ownership check via tutor_id) |
 | `createBatch(input)` | Create batch with paper, scheme, medium |
 | `updateBatchStatus(batchId, status)` | Update batch status (pending/processing/completed/failed) |
 | `updateBatchClaudeBatchId(batchId, claudeBatchId)` | Save Anthropic Batch API job ID |
@@ -354,6 +354,7 @@ Rules:
 | Function | Description |
 |----------|-------------|
 | `getSubmissionsByBatch(batchId)` | List submissions with nested student data |
+| `getSubmissionById(submissionId)` | Get single submission with student data and all summary fields (`total_awarded`, `total_max`, `general_feedback`, `best_questions_selected`, `paper_name`) — used by download route |
 | `createStudentAndSubmission(input)` | Create student + submission atomically |
 | `updateBatchPaperCount(batchId, total)` | Update total_papers count |
 | `updateSubmissionStatus(submissionId, status, claudeReqId?)` | Update submission status + optional claude_req_id |

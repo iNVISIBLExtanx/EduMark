@@ -59,7 +59,27 @@ XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 | Economics | Section A + B | — |
 | Business Studies | Section A + B | — |
 
+**Combined Maths `selection_rule` rule**: Must state raw marks explicitly — do NOT include any `/ 10` division arithmetic. The AI interprets division expressions as per-question mark scaling. The rule must say: "Output raw awarded_marks. Part A max_marks = 25 each, Part B max_marks = 150 each." The marking_rules block also includes rule 13 (all 10 Part A questions MUST appear) and rule 14 (max_marks must exactly match scheme values).
+
+**`paper_name` is REQUIRED for Combined Maths dispatch.** If `paper_name` is not stored on the batch yet, `BatchDetail.tsx` prompts the tutor to select 'Pure (Paper I)' or 'Applied (Paper II)' before enabling the dispatch button. The selected value is sent as `paper_name` in the POST body to the dispatch route.
+
 `paperName` (e.g. `'Pure (Paper I)'`, `'Applied (Paper II)'`) is passed as optional 4th arg to refine the `<paper_structure>` block for Combined Maths.
+
+### Post-Parse Sanitization — `sanitizeMarkingResult(result, subject)`
+
+After `markingResultSchema.parse()` in both `dispatchDirect` and `pollBatchResults`, call:
+
+```typescript
+const parsed = sanitizeMarkingResult(markingResultSchema.parse(JSON.parse(text)), subject);
+```
+
+For `subject === 'Combined Maths'` only:
+- Corrects wrong `max_marks`: Part A questions → 25, Part B questions → 150 (infers from `part` field; falls back to question_no ≤10 = Part A)
+- Recomputes `best_questions_selected`: top-5 Part B questions by `awarded_marks` descending
+- Recomputes `total_awarded`: sum(Part A awarded) + sum(best-5 Part B awarded)
+- Recomputes `total_max`: (Part A count × 25) + (min(Part B count, 5) × 150)
+
+For all other subjects: returns result unchanged.
 
 ### User Message — `buildUserMessageText(subject, paperName?)`
 Returns 7-step instruction text used alongside the native PDF document block:

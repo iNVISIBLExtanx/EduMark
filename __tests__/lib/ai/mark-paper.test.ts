@@ -206,3 +206,46 @@ describe('markingOutputFormat', () => {
     expect(markingOutputFormat.type).toBe('json_schema');
   });
 });
+
+describe('Combined Maths specific prompt rules', () => {
+  const scheme = 'Q1: 25 marks. Q11: 150 marks.';
+
+  it('selection_rule for Pure (Paper I) does not contain division by 10', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    // Must not have the confusing /10 scaling that caused wrong marks
+    expect(prompt).not.toMatch(/\/ ?10/);
+  });
+
+  it('selection_rule for Applied (Paper II) does not contain division by 10', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Applied (Paper II)');
+    expect(prompt).not.toMatch(/\/ ?10/);
+  });
+
+  it('system prompt contains rule 13 — all 10 Part A questions must appear', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('13.');
+    expect(prompt).toContain('ALL 10 questions MUST appear');
+  });
+
+  it('system prompt contains rule 14 — max_marks must be 25 or 150', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('14.');
+    expect(prompt).toContain('max_marks');
+  });
+
+  it('Part A marks_per_question is 25 in paper_structure XML', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('<marks_per_question>25</marks_per_question>');
+  });
+
+  it('Part B marks_per_question is 150 in paper_structure XML', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('<marks_per_question>150</marks_per_question>');
+  });
+
+  it('instructs to output raw awarded_marks, not scaled', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('Output raw awarded_marks');
+    expect(prompt).toContain('do NOT scale or divide by 10');
+  });
+});

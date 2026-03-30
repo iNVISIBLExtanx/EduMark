@@ -181,7 +181,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (729 tests, 55 files)
+## Current Test Coverage (773 tests, 56 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -196,8 +196,8 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/pdf/pdf-to-images.test.ts` | 5 | getPdfPageCount: page count, lightweight check, error handling |
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
-| `__tests__/lib/ai/mark-paper.test.ts` | 20 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks), buildUserMessageText (7 steps, paper label), markingResultSchema (paper_name, part, sub_questions, best_questions_selected), markingOutputFormat |
-| `__tests__/lib/ai/batch-dispatcher.test.ts` | 26 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName. Poll: result parsing, status updates, partial failures |
+| `__tests__/lib/ai/mark-paper.test.ts` | 24 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13+14 present), buildUserMessageText (7 steps, paper label), markingResultSchema (paper_name, part, sub_questions, best_questions_selected), markingOutputFormat |
+| `__tests__/lib/ai/batch-dispatcher.test.ts` | 32 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback). Poll: result parsing, status updates, partial failures |
 | `__tests__/app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `__tests__/app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
 | `__tests__/app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
@@ -215,6 +215,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/app/api/submissions/[id]/override/route.test.ts` | 8 | Auth, Zod validation (400), success 200, DB error handling |
 | `__tests__/app/api/tutor/profile/route.test.ts` | 12 | GET/POST/PATCH auth, validation, success, errors |
 | `__tests__/hooks/useSubscription.test.ts` | 10 | All derived values, edge cases |
+| `__tests__/hooks/useBatchDetail.test.ts` | 8 | Batch fields, paper_name exposed, subject_name extracted from nested join |
 | `__tests__/hooks/useBatchPolling.test.ts` | 5 | Corrected poll URL, enabled/disabled toggle, refreshInterval |
 | `__tests__/components/billing/AiMinutesBar.test.tsx` | 6 | All visual states |
 | `__tests__/components/billing/PricingTable.test.tsx` | 9 | Plans display, checkout, top-up |
@@ -228,14 +229,14 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/settings/SettingsView.test.tsx` | 17 | Profile card, billing card, edit mode, save/cancel, portal |
 | `__tests__/components/batches/BatchStatusBadge.test.tsx` | 7 | All status styles, fallback, base classes |
 | `__tests__/components/batches/BatchList.test.tsx` | 13 | Loading/error/empty states, links, counts, badges, Create Batch button + dialog, delete batch from card |
-| `__tests__/components/batches/BatchDetail.test.tsx` | 37 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration, back button, edit batch name |
+| `__tests__/components/batches/BatchDetail.test.tsx` | 44 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration, back button, edit batch name, Combined Maths paper selector (shows/hides/non-CM, disables dispatch until selection, enables after selection, sends paper_name in body) |
 | `__tests__/components/batches/BulkUploader.test.tsx` | 25 | Drop zone, file validation, upload, drag-and-drop |
 | `__tests__/components/batches/SubmissionResultsPanel.test.tsx` | 8 | Loading, error, results display, MarkingSummary + QuestionFeedbackCard rendering |
 | `__tests__/components/marking/QuestionFeedbackCard.test.tsx` | 18 | Read-only render, part badge (Part A/B/null), sub-question breakdown, edit toggle, save/cancel flow, override display, language fonts, OCR badge, saving state |
 | `__tests__/components/marking/MarkingSummary.test.tsx` | 4 | Basic render, percentage, override totals, adjustment note |
 | `__tests__/components/layout/SidebarNav.test.tsx` | 7 | Nav items, logout confirmation dialog, active state |
 | `__tests__/lib/db/reports.test.ts` | 10 | Reports CRUD: get, upsert, approve, null handling |
-| `__tests__/lib/pdf/report-renderer.test.ts` | 15 | HTML builder, font embedding, overrides, Puppeteer PDF |
-| `__tests__/app/api/reports/[id]/download/route.test.ts` | 12 | Auth, ownership, approval gate, PDF generation, storage upload |
+| `__tests__/lib/pdf/report-renderer.test.ts` | 24 | HTML builder, font embedding, overrides, Puppeteer PDF, paperName in header, Part A/B grouping, sub-questions table, best-5/not-counted badges, general_feedback block, totalAwarded/totalMax from params, fallback totals |
+| `__tests__/app/api/reports/[id]/download/route.test.ts` | 15 | Auth, ownership, approval gate, PDF generation, storage upload, new fields (part, sub_questions, paperName, generalFeedback, bestQuestionsSelected, totalAwarded, totalMax) passed to buildReportHTML |
 | `__tests__/app/api/reports/[id]/approve/route.test.ts` | 8 | Auth, ownership, status check, approval success |
 | `__tests__/e2e-marking-flow.test.ts` | 77 | Full tutor workflow (Phase 1–12): upload, batch, submissions, dispatch to Claude, poll processing, poll completed with result storage (paper_name + part fields), batch results retrieval, tutor mark overrides, report approval, PDF report download, Phase 11 dashboard, Phase 12 edge cases (double-dispatch, mixed results, file limits) |

@@ -53,9 +53,11 @@ Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 7. Returns `{ batch, pendingSubmissions, systemPromptText, subject, paperName }`
 
 **Phase 2 — `executeMarking(batchId, pendingSubmissions, systemPromptText, subject, paperName?)`** (fire-and-forget):
-- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. `MAX_OUTPUT_TOKENS = 32000`. User message uses `buildUserMessageText(subject, paperName)` alongside native PDF document block. Results saved immediately via `saveMarkingResults()`.
-- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. 1-hour cache TTL. Same user message text. Results retrieved via polling.
+- **≤10 papers (direct)**: `anthropic.messages.stream()` + `stream.finalMessage()` per paper. `MAX_OUTPUT_TOKENS = 32000`. User message uses `buildUserMessageText(subject, paperName)` alongside native PDF document block. After parsing AI JSON, calls `sanitizeMarkingResult(parsed, subject)` before `saveMarkingResults()`.
+- **>10 papers (Batch API)**: `anthropic.beta.messages.batches.create()`. 1-hour cache TTL. Same user message text. Same sanitization applied when processing results.
 - Both paths use `output_config: { format: markingOutputFormat }` (structured outputs) and check `stop_reason === 'max_tokens'` before parsing.
+
+**Combined Maths — paper_name is required**: For Combined Maths batches where `paper_name` is not yet stored on the batch, `BatchDetail.tsx` shows a paper selector ('Pure (Paper I)' / 'Applied (Paper II)') above the Mark Papers button. The button is disabled until the tutor selects a paper. The selected value is sent as `paper_name` in the POST body. Once stored on the batch, the selector is not shown on subsequent dispatches.
 
 **Dispatch route also accepts `paper_name`** from request body:
 ```typescript
@@ -63,7 +65,8 @@ const body = await req.json().catch(() => ({}));
 const paperName: string | undefined = body.paper_name;
 if (paperName) await updateBatchPaperName(batchId, user.id, paperName);
 ```
-This allows the UI to specify `'Pure (Paper I)'` or `'Applied (Paper II)'` for Combined Maths at dispatch time.
+
+**Server-side sanitization**: After parsing AI JSON with `markingResultSchema.parse()`, `sanitizeMarkingResult(result, subject)` is called before saving. For Combined Maths it corrects wrong `max_marks` (Part A → 25, Part B → 150), recomputes `best_questions_selected` (top-5 Part B), and recomputes `total_awarded`/`total_max`. For other subjects it is a no-op.
 
 The route returns `{ status: 'processing' }` immediately after Phase 1 succeeds. Phase 2 errors are logged but don't affect the HTTP response.
 

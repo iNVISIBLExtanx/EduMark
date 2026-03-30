@@ -38,6 +38,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [selectedPaperName, setSelectedPaperName] = useState('');
 
   const { pollData, isDone } = useBatchPolling(
     batchId,
@@ -69,7 +70,11 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     setDispatchError(null);
     setDispatching(true);
     try {
-      const res = await apiFetch<{ status: string }>(`/api/batches/${batchId}/dispatch`, { method: 'POST' });
+      const effectivePaperName = batch?.paper_name ?? (selectedPaperName || undefined);
+      const res = await apiFetch<{ status: string }>(`/api/batches/${batchId}/dispatch`, {
+        method: 'POST',
+        body: JSON.stringify(effectivePaperName ? { paper_name: effectivePaperName } : {}),
+      });
       await mutate();
       // Direct marking completes instantly — also refresh submissions
       if (res.status === 'completed') {
@@ -225,9 +230,25 @@ export function BatchDetail({ batchId }: { batchId: string }) {
       {/* Dispatch / Status Section */}
       {batch.status === 'pending' && submissions.length > 0 && (
         <div className="space-y-2">
+          {batch.subject_name === 'Combined Maths' && !batch.paper_name && (
+            <div className="space-y-1">
+              <label className="text-sm font-medium" htmlFor="paper-select">Select Paper</label>
+              <select
+                id="paper-select"
+                value={selectedPaperName}
+                onChange={(e) => setSelectedPaperName(e.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                data-testid="paper-name-select"
+              >
+                <option value="">Choose paper...</option>
+                <option value="Pure (Paper I)">Pure (Paper I)</option>
+                <option value="Applied (Paper II)">Applied (Paper II)</option>
+              </select>
+            </div>
+          )}
           <Button
             onClick={handleDispatch}
-            disabled={dispatching}
+            disabled={dispatching || (batch.subject_name === 'Combined Maths' && !batch.paper_name && !selectedPaperName)}
             data-testid="dispatch-button"
           >
             {dispatching ? (
