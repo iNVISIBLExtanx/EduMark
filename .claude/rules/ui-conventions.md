@@ -90,6 +90,43 @@ Delete buttons are on each batch card in `BatchList.tsx` (Trash2 icon), not insi
 - `failed`: Red error status
 - 402 errors: `UpgradeModal` for insufficient minutes
 
+## Submission Review Dialog Pattern
+
+`SubmissionReviewDialog.tsx` is a full-screen review modal that replaced the old inline `<TableRow>` expansion. Opened from the "View Results" button in `BatchDetail.tsx`.
+
+Props: `submissionId`, `studentName`, `language`, `isOpen`, `onClose`.
+
+State in `BatchDetail.tsx`:
+```tsx
+const [dialogSubmission, setDialogSubmission] = useState<{ id: string; studentName: string } | null>(null);
+```
+
+"View Results" button wiring:
+```tsx
+<Button onClick={() => setDialogSubmission({ id: submission.id, studentName: submission.students.name })}>
+  View Results
+</Button>
+```
+
+Dialog mount at bottom of `BatchDetail.tsx` render:
+```tsx
+{dialogSubmission && (
+  <SubmissionReviewDialog
+    submissionId={dialogSubmission.id}
+    studentName={dialogSubmission.studentName}
+    language={batch.medium}
+    isOpen={!!dialogSubmission}
+    onClose={() => setDialogSubmission(null)}
+  />
+)}
+```
+
+The dialog contains:
+- `SubmissionResultsPanel` (full results + per-question edit) in a scrollable area
+- Bottom action bar: "Close", "Download Report", "Approve & Download"
+- `data-testid="review-dialog"` on `DialogContent`
+- `className="max-w-4xl h-[90vh] flex flex-col p-0"` — fixed height, scrollable body
+
 ## Combined Maths Paper Selector
 
 For Combined Maths batches, the tutor must specify which paper they are dispatching ('Pure (Paper I)' or 'Applied (Paper II)') before marking can start.

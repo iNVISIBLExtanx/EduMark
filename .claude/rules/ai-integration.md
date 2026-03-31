@@ -109,9 +109,9 @@ Step 7: Complete the JSON output with all required fields.
 ### Language Instructions by Medium
 ```typescript
 const LANGUAGE_INSTRUCTIONS = {
-  sinhala: `Generate ALL feedback in Sinhala Unicode script (සිංහල). Set ocr_confidence to "low" if unclear.`,
-  tamil:   `Generate ALL feedback in Tamil script (தமிழ்). Set ocr_confidence to "low" if unclear.`,
-  english: `Generate ALL feedback in English. Set ocr_confidence to "low" if unclear.`,
+  sinhala: `Generate ALL feedback in Sinhala Unicode script (සිංහල). Write student_answer_text as a brief examiner note summarising what the student wrote, also in Sinhala. Set ocr_confidence to "low" if the handwriting is unclear.`,
+  tamil:   `Generate ALL feedback in Tamil script (தமிழ்). Write student_answer_text as a brief examiner note summarising what the student wrote, also in Tamil. Set ocr_confidence to "low" if the handwriting is unclear.`,
+  english: `Generate ALL feedback in English. Write student_answer_text as a brief examiner note summarising what the student wrote. Set ocr_confidence to "low" if the handwriting is unclear.`,
 };
 ```
 

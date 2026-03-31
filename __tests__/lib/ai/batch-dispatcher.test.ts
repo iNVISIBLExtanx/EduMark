@@ -357,11 +357,11 @@ describe('dispatchMarkingBatch (direct mode)', () => {
     expect(call.max_tokens).toBe(32000);
   });
 
-  it('includes cache_control ephemeral on the system block', async () => {
+  it('includes cache_control ephemeral with 1h TTL on the system block', async () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     const call = mockMessagesStream.mock.calls[0][0];
-    expect(call.system[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(call.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
   });
 
   it('sends PDF as native document block', async () => {
@@ -397,6 +397,15 @@ describe('dispatchMarkingBatch (direct mode)', () => {
     expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'failed');
     expect(mockSaveMarkingResults).not.toHaveBeenCalled();
     expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'failed');
+  });
+
+  it('overrides paper_name with batch canonical value, not Claude-invented text', async () => {
+    mockGetBatchById.mockResolvedValue(makeBatch({ paper_name: 'Pure (Paper I)' }));
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    // MOCK_MARKING_RESULT.paper_name is 'Paper II (Essay)' — should be overridden
+    const savedResult = mockSaveMarkingResults.mock.calls[0][1];
+    expect(savedResult.paper_name).toBe('Pure (Paper I)');
   });
 });
 

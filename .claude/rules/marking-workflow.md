@@ -82,13 +82,13 @@ UI: `BatchDetail.tsx` shows a 'Mark Papers' button when `batch.status === 'pendi
 3. If no `claude_batch_id` and status is `pending`: throw `batch_not_dispatched`
 4. `anthropic.beta.messages.batches.retrieve(claudeBatchId)` — check Batch API status
 5. If `processing_status !== 'ended'`: return `{ status: 'processing', marked, total }`
-4. If `processing_status === 'ended'`:
+6. If `processing_status === 'ended'`:
    - Iterate `anthropic.beta.messages.batches.results(claudeBatchId)` (async iterable)
-   - For each `succeeded` result: parse JSON → `saveMarkingResults(submissionId, parsed)` → `updateSubmissionStatus(submissionId, 'marked')`
+   - For each `succeeded` result: parse JSON → `markingResultSchema.parse()` → `sanitizeMarkingResult(parsed, subject)` → `saveMarkingResults(submissionId, sanitized)` → `updateSubmissionStatus(submissionId, 'marked')`
    - For failed results: `updateSubmissionStatus(submissionId, 'failed')`
    - `updateBatchMarkedPapers(batchId, markedCount)`
    - `updateBatchStatus(batchId, 'completed')` — or `'failed'` if all results failed
-5. Return `{ status: 'completed' | 'failed', marked, total }`
+7. Return `{ status: 'completed' | 'failed', marked, total }`
 
 UI: `useBatchPolling` hook (15s refresh) is wired into `BatchDetail.tsx`. Progress text shows marked/total count during processing. On completion, `useEffect` triggers `mutate()` to refresh batch and submission data.
 

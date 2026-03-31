@@ -8,12 +8,12 @@ import { useBatchPolling } from '@/hooks/useBatchPolling';
 import { useSubscription } from '@/hooks/useSubscription';
 import { BatchStatusBadge } from './BatchStatusBadge';
 import { LanguageBadge } from '@/components/shared/LanguageBadge';
-import { SubmissionResultsPanel } from './SubmissionResultsPanel';
 import { BulkUploader } from './BulkUploader';
+import { SubmissionReviewDialog } from './SubmissionReviewDialog';
 import { UpgradeModal } from '@/components/billing/UpgradeModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, ChevronDown, ChevronRight, Download, Check, Loader2, Zap, CheckCircle, XCircle, Pencil } from 'lucide-react';
+import { ArrowLeft, Download, Check, Loader2, Zap, CheckCircle, XCircle, Pencil } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api-client';
 import {
@@ -30,7 +30,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   const { batch, isLoading, error, mutate } = useBatchDetail(batchId);
   const { submissions, isLoading: submissionsLoading, mutate: submissionsMutate } = useSubmissions(batchId);
   const { available } = useSubscription();
-  const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
+  const [dialogSubmission, setDialogSubmission] = useState<{ id: string; studentName: string } | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -55,10 +55,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;
   if (!batch) return <p className="p-6 text-gray-500">Batch not found</p>;
-
-  const toggleExpand = (submissionId: string) => {
-    setExpandedSubmissionId((prev) => (prev === submissionId ? null : submissionId));
-  };
 
   const getAuthHeaders = async () => {
     const supabase = createBrowserClient();
@@ -327,7 +323,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
             </TableHeader>
             <TableBody>
               {submissions.map((submission) => {
-                const isExpanded = expandedSubmissionId === submission.id;
                 const isMarked = submission.status === 'marked';
                 const isDownloading = downloadingId === submission.id;
                 return (
@@ -344,14 +339,9 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => toggleExpand(submission.id)}
+                              onClick={() => setDialogSubmission({ id: submission.id, studentName: submission.students.name })}
                             >
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 mr-1" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 mr-1" />
-                              )}
-                              {isExpanded ? 'Hide Results' : 'View Results'}
+                              View Results
                             </Button>
                             <Button
                               variant="ghost"
@@ -385,16 +375,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                         )}
                       </TableCell>
                     </TableRow>
-                    {isExpanded && isMarked && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="p-0 px-4 pb-4">
-                          <SubmissionResultsPanel
-                            submissionId={submission.id}
-                            language={batch.medium}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    )}
                   </Fragment>
                 );
               })}
@@ -403,6 +383,15 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         )}
       </div>
 
+      {dialogSubmission && (
+        <SubmissionReviewDialog
+          submissionId={dialogSubmission.id}
+          studentName={dialogSubmission.studentName}
+          language={batch.medium}
+          isOpen={!!dialogSubmission}
+          onClose={() => setDialogSubmission(null)}
+        />
+      )}
       <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </div>
   );

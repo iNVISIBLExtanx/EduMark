@@ -279,6 +279,13 @@ describe('buildReportHTML', () => {
     // 7 + 15 = 22/30
     expect(html).toContain('Total: 22/30');
   });
+
+  it('does not render student answer section in question cards', () => {
+    const html = buildReportHTML(makeParams());
+    expect(html).not.toContain('class="answer-section"');
+    expect(html).not.toContain('<h4>Student Answer</h4>');
+    expect(html).not.toContain('class="student-answer');
+  });
 });
 
 describe('generateReportPDF', () => {
