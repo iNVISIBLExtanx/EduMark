@@ -112,7 +112,7 @@ vi.mock('@/lib/ai/claude-client', () => ({
 }));
 
 // --- Import after mocks ---
-import { dispatchMarkingBatch, pollBatchResults, prepareMarking, executeMarking } from '@/lib/ai/batch-dispatcher';
+import { dispatchMarkingBatch, pollBatchResults, prepareMarking, executeMarking, sanitizeMarkingResult } from '@/lib/ai/batch-dispatcher';
 
 // --- Test data factories ---
 function makeBatch(overrides = {}) {
@@ -163,11 +163,12 @@ beforeEach(() => {
     structure_json: { questions: [{ no: 1, marks: 10 }] },
     embeddings_done: true,
   });
+  // Supabase FK join returns a single object, NOT an array
   mockGetQuestionPaperById.mockResolvedValue({
     id: PAPER_ID,
     tutor_id: TUTOR_ID,
     title: 'Physics 2025',
-    subjects: [{ name: 'Physics' }],
+    subjects: { name: 'Physics' },
   });
   mockBuildSystemPrompt.mockReturnValue('You are an expert examiner...');
   mockBuildUserMessageText.mockReturnValue('mock 7-step marking instructions');
@@ -265,6 +266,25 @@ describe('dispatchMarkingBatch', () => {
 
     expect(mockBuildSystemPrompt).toHaveBeenCalledWith(
       'General',
+      expect.any(String),
+      expect.any(String),
+      undefined,
+    );
+  });
+
+  it('extracts subject name from Supabase single-object FK join (not array)', async () => {
+    // Supabase returns subjects as { name: 'Combined Maths' }, not [{ name: 'Combined Maths' }]
+    mockGetQuestionPaperById.mockResolvedValue({
+      id: PAPER_ID,
+      tutor_id: TUTOR_ID,
+      title: 'Combined Maths 2025',
+      subjects: { name: 'Combined Maths' },
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockBuildSystemPrompt).toHaveBeenCalledWith(
+      'Combined Maths',
       expect.any(String),
       expect.any(String),
       undefined,
@@ -797,5 +817,169 @@ describe('pollBatchResults', () => {
 
     expect(result).toEqual({ status: 'failed', marked: 0, total: 2 });
     expect(mockBatchesRetrieve).not.toHaveBeenCalled();
+  });
+
+  it('extracts subject from single-object question_papers.subjects join in pollBatchResults', async () => {
+    // getBatchById returns question_papers as a single object (many-to-one FK), not an array
+    mockGetBatchById.mockResolvedValue({
+      ...makeBatch({ claude_batch_id: CLAUDE_BATCH_ID, total_papers: 1 }),
+      question_papers: { subjects: { name: 'Combined Maths' } },
+    });
+    mockBatchesRetrieve.mockResolvedValue({ processing_status: 'ended' });
+    mockBatchesResults.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield {
+          custom_id: SUBMISSION_ID_1,
+          result: {
+            type: 'succeeded',
+            message: {
+              stop_reason: 'end_turn',
+              content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
+            },
+          },
+        };
+      },
+    });
+
+    await pollBatchResults(BATCH_ID, TUTOR_ID);
+
+    // sanitizeMarkingResult is called with 'Combined Maths' (not 'General') —
+    // verified indirectly: saveMarkingResults is called (parse succeeded)
+    expect(mockSaveMarkingResults).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================
+// sanitizeMarkingResult — unit tests (pure function, no mocks needed)
+// ============================================================
+describe('sanitizeMarkingResult', () => {
+  function makeQuestion(overrides: Partial<{
+    part: string; question_no: number; max_marks: number; awarded_marks: number;
+    student_answer_text: string; feedback: string; ocr_confidence: 'high' | 'low';
+  }> = {}) {
+    return {
+      part: 'Part A',
+      question_no: 1,
+      max_marks: 10,
+      awarded_marks: 8,
+      student_answer_text: 'answer',
+      feedback: 'good',
+      ocr_confidence: 'high' as const,
+      ...overrides,
+    };
+  }
+
+  function makeResult(questions: ReturnType<typeof makeQuestion>[], overrides: Partial<{
+    best_questions_selected: number[]; total_awarded: number; total_max: number;
+  }> = {}) {
+    return {
+      paper_name: 'Pure (Paper I)',
+      questions,
+      total_awarded: questions.reduce((s, q) => s + q.awarded_marks, 0),
+      total_max: questions.reduce((s, q) => s + q.max_marks, 0),
+      general_feedback: '',
+      ...overrides,
+    };
+  }
+
+  it('returns result unchanged for non-Combined-Maths subject', () => {
+    const result = makeResult([makeQuestion({ part: 'Part A', question_no: 1, max_marks: 25 })]);
+    const out = sanitizeMarkingResult(result, 'Physics');
+    expect(out).toBe(result); // same reference
+  });
+
+  it('corrects Part A max_marks from wrong value to 25', () => {
+    const result = makeResult([
+      makeQuestion({ part: 'Part A', question_no: 1, max_marks: 10, awarded_marks: 8 }),
+      makeQuestion({ part: 'Part A', question_no: 2, max_marks: 10, awarded_marks: 6 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    expect(out.questions[0].max_marks).toBe(25);
+    expect(out.questions[1].max_marks).toBe(25);
+  });
+
+  it('corrects Part B max_marks from wrong value to 150', () => {
+    const partBQs = Array.from({ length: 5 }, (_, i) =>
+      makeQuestion({ part: 'Part B', question_no: 11 + i, max_marks: 10, awarded_marks: 8 - i })
+    );
+    const result = makeResult([
+      ...Array.from({ length: 10 }, (_, i) =>
+        makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+      ),
+      ...partBQs,
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const partBOut = out.questions.filter(q => q.part === 'Part B');
+    partBOut.forEach(q => expect(q.max_marks).toBe(150));
+  });
+
+  it('recomputes best_questions_selected as top 5 Part B by awarded_marks', () => {
+    const partA = Array.from({ length: 10 }, (_, i) =>
+      makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+    );
+    const partB = [
+      makeQuestion({ part: 'Part B', question_no: 11, max_marks: 150, awarded_marks: 130 }),
+      makeQuestion({ part: 'Part B', question_no: 12, max_marks: 150, awarded_marks: 110 }),
+      makeQuestion({ part: 'Part B', question_no: 13, max_marks: 150, awarded_marks: 90 }),
+      makeQuestion({ part: 'Part B', question_no: 14, max_marks: 150, awarded_marks: 70 }),
+      makeQuestion({ part: 'Part B', question_no: 15, max_marks: 150, awarded_marks: 50 }),
+      makeQuestion({ part: 'Part B', question_no: 16, max_marks: 150, awarded_marks: 30 }),
+      makeQuestion({ part: 'Part B', question_no: 17, max_marks: 150, awarded_marks: 10 }),
+    ];
+    const result = makeResult([...partA, ...partB]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+
+    // Best 5 should be Q11–Q15 (highest awarded_marks)
+    expect(out.best_questions_selected).toHaveLength(5);
+    expect(out.best_questions_selected).toContain(11);
+    expect(out.best_questions_selected).toContain(15);
+    expect(out.best_questions_selected).not.toContain(16);
+    expect(out.best_questions_selected).not.toContain(17);
+  });
+
+  it('recomputes total_awarded as Part A sum + best-5 Part B sum', () => {
+    const partA = Array.from({ length: 10 }, (_, i) =>
+      makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+    );
+    const partB = [
+      makeQuestion({ part: 'Part B', question_no: 11, max_marks: 150, awarded_marks: 130 }),
+      makeQuestion({ part: 'Part B', question_no: 12, max_marks: 150, awarded_marks: 110 }),
+      makeQuestion({ part: 'Part B', question_no: 13, max_marks: 150, awarded_marks: 90 }),
+      makeQuestion({ part: 'Part B', question_no: 14, max_marks: 150, awarded_marks: 70 }),
+      makeQuestion({ part: 'Part B', question_no: 15, max_marks: 150, awarded_marks: 50 }),
+      makeQuestion({ part: 'Part B', question_no: 16, max_marks: 150, awarded_marks: 30 }),
+      makeQuestion({ part: 'Part B', question_no: 17, max_marks: 150, awarded_marks: 10 }),
+    ];
+    const result = makeResult([...partA, ...partB]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+
+    // Part A: 10 × 20 = 200. Best-5: 130+110+90+70+50 = 450. Total = 650
+    expect(out.total_awarded).toBe(650);
+  });
+
+  it('recomputes total_max correctly', () => {
+    const partA = Array.from({ length: 10 }, (_, i) =>
+      makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+    );
+    const partB = Array.from({ length: 7 }, (_, i) =>
+      makeQuestion({ part: 'Part B', question_no: 11 + i, max_marks: 150, awarded_marks: 100 })
+    );
+    const result = makeResult([...partA, ...partB]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+
+    // 10 × 25 + 5 × 150 = 250 + 750 = 1000
+    expect(out.total_max).toBe(1000);
+  });
+
+  it('infers Part A from question_no ≤ 10 when part is empty string', () => {
+    const result = makeResult([
+      makeQuestion({ part: '', question_no: 5, max_marks: 10, awarded_marks: 8 }),
+      makeQuestion({ part: '', question_no: 12, max_marks: 10, awarded_marks: 100 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const q5 = out.questions.find(q => q.question_no === 5);
+    const q12 = out.questions.find(q => q.question_no === 12);
+    expect(q5?.max_marks).toBe(25);
+    expect(q12?.max_marks).toBe(150);
   });
 });

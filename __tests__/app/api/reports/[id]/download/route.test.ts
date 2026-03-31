@@ -232,4 +232,66 @@ describe('GET /api/reports/[id]/download', () => {
     const body = await res.json();
     expect(body.error).toBe('Internal server error');
   });
+
+  it('passes paperName from submission summary to buildReportHTML', async () => {
+    setupSuccessMocks();
+    mockGetSubmissionById.mockResolvedValue({
+      ...MOCK_SUBMISSION,
+      paper_name: 'Pure (Paper I)',
+    });
+    await GET(makeRequest(), makeParams());
+    expect(mockBuildReportHTML).toHaveBeenCalledWith(
+      expect.objectContaining({ paperName: 'Pure (Paper I)' })
+    );
+  });
+
+  it('passes generalFeedback from submission summary to buildReportHTML', async () => {
+    setupSuccessMocks();
+    mockGetSubmissionById.mockResolvedValue({
+      ...MOCK_SUBMISSION,
+      general_feedback: 'Strong performance overall.',
+    });
+    await GET(makeRequest(), makeParams());
+    expect(mockBuildReportHTML).toHaveBeenCalledWith(
+      expect.objectContaining({ generalFeedback: 'Strong performance overall.' })
+    );
+  });
+
+  it('passes bestQuestionsSelected and totalAwarded/totalMax to buildReportHTML', async () => {
+    setupSuccessMocks();
+    mockGetSubmissionById.mockResolvedValue({
+      ...MOCK_SUBMISSION,
+      best_questions_selected: [11, 12, 13, 14, 15],
+      total_awarded: 800,
+      total_max: 1000,
+    });
+    await GET(makeRequest(), makeParams());
+    expect(mockBuildReportHTML).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bestQuestionsSelected: [11, 12, 13, 14, 15],
+        totalAwarded: 800,
+        totalMax: 1000,
+      })
+    );
+  });
+
+  it('passes results including part and sub_questions fields to buildReportHTML', async () => {
+    const resultsWithPart = [
+      {
+        id: 'r1',
+        part: 'Part A',
+        question_no: 1,
+        awarded_marks: 20,
+        max_marks: 25,
+        feedback: 'Correct',
+        sub_questions: [{ label: '(a)', max_marks: 10, awarded_marks: 8, feedback: 'Good' }],
+      },
+    ];
+    setupSuccessMocks();
+    mockGetMarkingResultsBySubmission.mockResolvedValue(resultsWithPart);
+    await GET(makeRequest(), makeParams());
+    expect(mockBuildReportHTML).toHaveBeenCalledWith(
+      expect.objectContaining({ results: resultsWithPart })
+    );
+  });
 });

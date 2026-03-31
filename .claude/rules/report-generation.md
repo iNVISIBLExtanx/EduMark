@@ -46,20 +46,66 @@ Include inline CSS only (no external fonts via URL — embed base64 fonts for Si
 ### Report Structure (per submission)
 ```html
 <header>
-  Student Name | Index No | Subject | Date | Total: X/Y
+  Subject [— paperName if set] | Student Name | Index No | Date | Total: X/Y
 </header>
 
-<section class="question" v-for="q in questions">
-  <h3>Question {q.question_no}  [{q.awarded_marks}/{q.max_marks}]</h3>
+<div class="part-heading">Part A</div>   <!-- only when results have part set -->
+<section class="question" v-for="q in partAQuestions">
+  <h3>Question {q.question_no} [badges: OCR, Override, Best5/NotCounted] [{marks}/{max}]</h3>
   <div class="student-answer">{q.student_answer_text}</div>
   <div class="feedback">{q.feedback}</div>  <!-- in tutor's language -->
-  <div class="mark-breakdown">...</div>
+  <table class="sub-questions">...</table>  <!-- only when sub_questions present -->
 </section>
+
+<div class="part-heading">Part B</div>
+<section class="question" ...>  <!-- same structure, + Best5/NotCounted badges -->
+
+<div class="general-feedback">...</div>  <!-- only when generalFeedback non-empty -->
 
 <footer>
   Marked by EduMark AI | Reviewed by {tutorName} | {date}
 </footer>
 ```
+
+### `ReportHTMLParams` Interface
+```typescript
+interface ReportHTMLParams {
+  studentName: string;
+  indexNo: string | null;
+  subjectName: string;
+  date: string;
+  language: 'sinhala' | 'tamil' | 'english';
+  tutorName: string;
+  results: Array<{
+    part: string;                      // 'Part A' | 'Part B' | ''
+    question_no: number;
+    max_marks: number;
+    awarded_marks: number;
+    student_answer_text: string | null;
+    feedback: string;
+    ocr_confidence: string;
+    tutor_override: boolean;
+    override_marks: number | null;
+    override_feedback: string | null;
+    sub_questions?: Array<{
+      label: string; max_marks: number; awarded_marks: number; feedback: string;
+    }> | null;
+  }>;
+  paperName?: string | null;              // e.g. 'Pure (Paper I)'
+  generalFeedback?: string | null;        // shown as block above footer
+  bestQuestionsSelected?: number[] | null; // Part B question numbers for BEST-5 badges
+  totalAwarded?: number | null;           // from submission summary (pre-sanitized)
+  totalMax?: number | null;               // from submission summary (pre-sanitized)
+}
+```
+
+**Totals**: Use `totalAwarded`/`totalMax` from params when provided (these come from `submissions.total_awarded`/`total_max` which are sanitized at marking time). Fall back to summing results array only when params are null/undefined (backward compatibility).
+
+**Part A/B grouping**: Sort results by part order (Part A first) then question_no ascending. Insert `<div class="part-heading">` separator when `part` is non-empty and changes.
+
+**BEST-5 badges**: On Part B questions — green "Best 5 ✓" badge if question_no is in `bestQuestionsSelected`; gray "Not counted" badge if not selected. Marks color = gray for "not counted" questions regardless of percentage.
+
+**Sub-questions table**: Rendered after the feedback section when `sub_questions` array is non-empty.
 
 ## Font Embedding (critical for Sinhala/Tamil)
 Download Noto Sans Sinhala/Tamil TTF → convert to base64 → embed in `<style>`:
@@ -88,3 +134,17 @@ export async function GET(req, { params }) {
 ```
 
 **Note**: `approveReport()` uses `upsert` (not `update`) with `onConflict: 'submission_id'` to handle the case where no report record exists yet. This prevents the chicken-and-egg problem where download checks for an approved report but no record exists.
+
+## Storage RLS Policy Requirements for `reports` Bucket
+
+The download route uploads the generated PDF via `supabase.storage.from('reports').upload(..., { upsert: true })`. Supabase storage upsert requires **both INSERT and UPDATE policies** — INSERT for the first upload, UPDATE for any subsequent re-download of the same report.
+
+Required RLS policies on `storage.objects` for the `reports` bucket:
+- `rep_select_own` — SELECT
+- `rep_insert_own` — INSERT
+- `rep_update_own` — UPDATE ← **required for upsert to work on re-download**
+- `rep_delete_own` — DELETE
+
+All policies scope by tutor: `(storage.foldername(name))[1] = auth.uid()::text`
+
+**Bug history**: The `rep_update_own` policy was missing, causing `POST 400` on second download of the same report. First download succeeded (INSERT); second failed (UPDATE denied). Migration `add_reports_storage_update_policy` added the missing policy.

@@ -95,7 +95,7 @@ export async function apiUpload<T>(url: string, formData: FormData): Promise<T> 
 | `useQuestionPapers` | `/api/question-papers` | tutor's question papers |
 | `useTutorSubjects` | `/api/tutor/subjects` | tutor's registered subjects |
 | `useBatches` | `/api/batches` | all batches for tutor |
-| `useBatchDetail` | `/api/batches/[id]` | single batch with submissions |
+| `useBatchDetail` | `/api/batches/[id]` | single batch; returns `BatchDetail` with `paper_name: string \| null` and `subject_name: string \| null` (flattened from `question_papers.subjects.name` join) |
 | `useSubmissions` | `/api/batches/[id]/submissions` | submissions in a batch |
 | `useMarkingResults` | `/api/submissions/[id]` | returns `{ results: MarkingResultRow[], summary: SubmissionSummary \| null, isLoading, error, mutate }`. `MarkingResultRow` includes `part`, `sub_questions`, `tutor_override`, `override_marks`, `override_feedback`. `SubmissionSummary` includes `total_awarded`, `total_max`, `general_feedback`, `best_questions_selected`, `paper_name`. |
 | `useBatchPolling` | `/api/batches/[id]/poll` | polls Claude Batch API during processing |

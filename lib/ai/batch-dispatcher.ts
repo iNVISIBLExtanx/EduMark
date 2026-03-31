@@ -10,6 +10,45 @@ import { saveMarkingResults } from '@/lib/db/marking-results';
 /** Threshold: batches with this many or fewer papers use direct (instant) marking */
 const DIRECT_MARKING_THRESHOLD = 10;
 
+/**
+ * Defense-in-depth post-parse correction for Combined Maths marking results.
+ *
+ * The AI prompt instructs correct max_marks and BEST-5 selection, but as a
+ * server-side safety net we enforce them here regardless of AI output.
+ *
+ * For all other subjects: no-op, returns result unchanged.
+ */
+export function sanitizeMarkingResult(result: MarkingResult, subject: string): MarkingResult {
+  if (subject !== 'Combined Maths') return result;
+
+  const partAQuestions = result.questions
+    .filter((q) => q.part === 'Part A' || (q.part === '' && q.question_no <= 10))
+    .map((q) => ({ ...q, part: q.part || 'Part A', max_marks: 25 }));
+
+  const partBQuestions = result.questions
+    .filter((q) => q.part === 'Part B' || (q.part === '' && q.question_no > 10))
+    .map((q) => ({ ...q, part: q.part || 'Part B', max_marks: 150 }));
+
+  // Select best 5 Part B questions by awarded_marks descending
+  const sortedPartB = [...partBQuestions].sort((a, b) => b.awarded_marks - a.awarded_marks);
+  const best5 = sortedPartB.slice(0, 5);
+  const best5Nos = best5.map((q) => q.question_no);
+
+  const totalAwarded =
+    partAQuestions.reduce((s, q) => s + q.awarded_marks, 0) +
+    best5.reduce((s, q) => s + q.awarded_marks, 0);
+  const totalMax =
+    partAQuestions.length * 25 + Math.min(partBQuestions.length, 5) * 150;
+
+  return {
+    ...result,
+    questions: [...partAQuestions, ...partBQuestions],
+    best_questions_selected: best5Nos,
+    total_awarded: totalAwarded,
+    total_max: totalMax,
+  };
+}
+
 /** Max output tokens — set high for Sinhala/Tamil which use ~2-3x more tokens than English */
 const MAX_OUTPUT_TOKENS = 32000;
 
@@ -31,8 +70,9 @@ async function loadMarkingContext(batchId: string, tutorId: string) {
     ? JSON.stringify(scheme.structure_json)
     : '';
   const paper = await getQuestionPaperById(batch.paper_id, tutorId);
-  const subjects = (paper as unknown as { subjects?: { name: string }[] }).subjects;
-  const subjectName = subjects?.[0]?.name ?? 'General';
+  // Supabase returns the FK join as a single object (many-to-one), not an array
+  const subjects = (paper as unknown as { subjects?: { name: string } }).subjects;
+  const subjectName = subjects?.name ?? 'General';
   const paperName: string | undefined = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
   const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText, paperName);
 
@@ -149,7 +189,10 @@ async function dispatchDirect(
 
       const textBlock = response.content.find((b) => b.type === 'text');
       if (textBlock && 'text' in textBlock) {
-        const parsed: MarkingResult = markingResultSchema.parse(JSON.parse(textBlock.text));
+        const parsed: MarkingResult = sanitizeMarkingResult(
+          markingResultSchema.parse(JSON.parse(textBlock.text)),
+          subject,
+        );
         await saveMarkingResults(sub.id, parsed);
         await updateSubmissionStatus(sub.id, 'marked');
         markedCount++;
@@ -334,7 +377,14 @@ export async function pollBatchResults(batchId: string, tutorId: string): Promis
         try {
           // With structured outputs, the response is guaranteed valid JSON
           // matching our schema (when not truncated). Zod parse adds safety.
-          const parsed: MarkingResult = markingResultSchema.parse(JSON.parse(textBlock.text));
+          // sanitizeMarkingResult corrects wrong max_marks + recomputes BEST-5 for Combined Maths.
+          // Supabase returns FK joins as single objects (many-to-one), not arrays
+          const batchSubject = (batch as unknown as { question_papers?: { subjects?: { name?: string } } })
+            .question_papers?.subjects?.name ?? 'General';
+          const parsed: MarkingResult = sanitizeMarkingResult(
+            markingResultSchema.parse(JSON.parse(textBlock.text)),
+            batchSubject,
+          );
           await saveMarkingResults(submissionId, parsed);
           await updateSubmissionStatus(submissionId, 'marked');
           markedCount++;

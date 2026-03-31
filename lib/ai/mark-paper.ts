@@ -57,7 +57,7 @@ const SUBJECT_CONFIGS: Record<string, SubjectPaperConfig> = {
           },
         ],
         selection_rule:
-          'Paper I total = (Part A total / 10) + (best 5 Part B questions / 10). Final paper mark = 1000 / 10 = 100.',
+          'Output raw awarded_marks — do NOT scale or divide by 10. Part A: all 10 questions MUST appear in the output array, each max_marks = 25. Part B: mark all attempted questions, each max_marks = 150; populate best_questions_selected with the 5 question numbers with highest awarded_marks. Part A raw total (max 250) + best-5 Part B raw total (max 750) = paper raw total (max 1000).',
       },
       {
         name: 'Applied (Paper II)',
@@ -80,7 +80,7 @@ const SUBJECT_CONFIGS: Record<string, SubjectPaperConfig> = {
           },
         ],
         selection_rule:
-          'Paper II total = (Part A total / 10) + (best 5 Part B questions / 10). Final paper mark = 1000 / 10 = 100.',
+          'Output raw awarded_marks — do NOT scale or divide by 10. Part A: all 10 questions MUST appear in the output array, each max_marks = 25. Part B: mark all attempted questions, each max_marks = 150; populate best_questions_selected with the 5 question numbers with highest awarded_marks. Part A raw total (max 250) + best-5 Part B raw total (max 750) = paper raw total (max 1000).',
       },
     ],
     special_notes:
@@ -339,7 +339,7 @@ export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 // System prompt builder — specific, structured, unambiguous
 // ---------------------------------------------------------------------------
 
-function buildPartInstructions(subject: string): string {
+function buildPartInstructions(subject: string, paperName?: string): string {
   const config = SUBJECT_CONFIGS[subject];
   if (!config) {
     return `This is a general essay paper. Mark each question according to the marking scheme provided.`;
@@ -347,7 +347,13 @@ function buildPartInstructions(subject: string): string {
 
   const lines: string[] = [`<paper_structure subject="${subject}">`];
 
-  for (const paper of config.papers) {
+  // When paperName is specified, only include the matching paper's structure.
+  // This prevents the AI from being confused by multiple paper descriptions.
+  const papersToShow = paperName
+    ? config.papers.filter((p) => p.name === paperName)
+    : config.papers;
+
+  for (const paper of papersToShow) {
     lines.push(`  <paper name="${paper.name}">`);
     lines.push(`    <selection_rule>${paper.selection_rule}</selection_rule>`);
     for (const part of paper.parts) {
@@ -374,7 +380,7 @@ export function buildSystemPrompt(
   paperName?: string,
 ): string {
   const langInstructions = LANGUAGE_INSTRUCTIONS[medium] ?? LANGUAGE_INSTRUCTIONS.english;
-  const partInstructions = buildPartInstructions(subject);
+  const partInstructions = buildPartInstructions(subject, paperName);
 
   return `You are an expert Sri Lanka G.C.E. Advanced Level ${subject} examiner with 15+ years of marking experience.
 You are marking handwritten student answer scripts using an official tutor-provided marking scheme.
@@ -394,6 +400,8 @@ ${langInstructions}
 10. If a page appears blank or skipped, note it in general_feedback — do not assume it means the question was not attempted.
 11. Express uncertainty explicitly: if you cannot read a word or symbol, say so in the feedback and set ocr_confidence to "low".
 12. Do NOT hallucinate answers or assume the student wrote something that is not legible in the image.
+13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question.
+14. The max_marks field MUST exactly match the paper structure. For Combined Maths: Part A questions max_marks = 25, Part B questions max_marks = 150. Never output 10 or any other value for max_marks.
 </marking_rules>
 
 ${partInstructions}

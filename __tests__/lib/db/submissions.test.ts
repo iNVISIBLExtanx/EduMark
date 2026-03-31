@@ -128,7 +128,7 @@ describe('getSubmissionById', () => {
     expect(result).toEqual(submission);
     expect(mockSupabaseClient.from).toHaveBeenCalledWith('submissions');
     expect(mockSupabaseClient.select).toHaveBeenCalledWith(
-      'id, student_id, batch_id, pdf_url, status, students(name, index_no)',
+      'id, student_id, batch_id, pdf_url, status, total_awarded, total_max, general_feedback, best_questions_selected, paper_name, students(name, index_no)',
     );
     expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'sub-1');
   });

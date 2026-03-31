@@ -347,7 +347,7 @@ describe('BatchDetail', () => {
     fireEvent.click(screen.getByText('Mark Papers'));
 
     await vi.waitFor(() => {
-      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1/dispatch', { method: 'POST' });
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1/dispatch', { method: 'POST', body: '{}' });
     });
   });
 
@@ -492,6 +492,103 @@ describe('BatchDetail', () => {
     // Give any async handlers time to fire
     await vi.waitFor(() => {
       expect(mockApiFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Combined Maths paper selector tests ---
+
+  it('shows paper selector for Combined Maths when paper_name is null', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('paper-name-select')).toBeInTheDocument();
+    expect(screen.getByText('Select Paper')).toBeInTheDocument();
+  });
+
+  it('does not show paper selector when paper_name is already set', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: 'Pure (Paper I)',
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('paper-name-select')).not.toBeInTheDocument();
+  });
+
+  it('does not show paper selector for non-Combined Maths subjects', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Physics',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('paper-name-select')).not.toBeInTheDocument();
+  });
+
+  it('disables dispatch button for Combined Maths when no paper selected', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    const button = screen.getByTestId('dispatch-button');
+    expect(button).toBeDisabled();
+  });
+
+  it('enables dispatch button for Combined Maths after paper is selected', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    const select = screen.getByTestId('paper-name-select');
+    fireEvent.change(select, { target: { value: 'Applied (Paper II)' } });
+    const button = screen.getByTestId('dispatch-button');
+    expect(button).not.toBeDisabled();
+  });
+
+  it('sends paper_name in dispatch body when paper is selected', async () => {
+    mockApiFetch.mockResolvedValue({ status: 'processing' });
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.change(screen.getByTestId('paper-name-select'), { target: { value: 'Pure (Paper I)' } });
+    fireEvent.click(screen.getByTestId('dispatch-button'));
+
+    await vi.waitFor(() => {
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/api/batches/b1/dispatch',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ paper_name: 'Pure (Paper I)' }),
+        }),
+      );
     });
   });
 });

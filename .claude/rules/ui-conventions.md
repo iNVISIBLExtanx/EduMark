@@ -89,3 +89,32 @@ Delete buttons are on each batch card in `BatchList.tsx` (Trash2 icon), not insi
 - `completed`: Green checkmark status
 - `failed`: Red error status
 - 402 errors: `UpgradeModal` for insufficient minutes
+
+## Combined Maths Paper Selector
+
+For Combined Maths batches, the tutor must specify which paper they are dispatching ('Pure (Paper I)' or 'Applied (Paper II)') before marking can start.
+
+**When to show**: `batch.subject_name === 'Combined Maths'` AND `batch.paper_name` is null (not yet set).
+
+**Pattern in `BatchDetail.tsx`**:
+```tsx
+{batch.subject_name === 'Combined Maths' && !batch.paper_name && (
+  <div className="space-y-1">
+    <label className="text-sm font-medium">Select Paper</label>
+    <select value={selectedPaperName} onChange={e => setSelectedPaperName(e.target.value)}
+      className="rounded-md border border-gray-300 px-3 py-2 text-sm">
+      <option value="">Choose paper...</option>
+      <option value="Pure (Paper I)">Pure (Paper I)</option>
+      <option value="Applied (Paper II)">Applied (Paper II)</option>
+    </select>
+  </div>
+)}
+```
+
+**Disable dispatch button** until selection is made:
+```typescript
+const needsPaperSelection = batch.subject_name === 'Combined Maths' && !batch.paper_name && !selectedPaperName;
+// Apply: disabled={dispatching || needsPaperSelection}
+```
+
+**Send in dispatch body**: Pass selected value as `paper_name` in the POST body. Once stored on the batch the selector is hidden.

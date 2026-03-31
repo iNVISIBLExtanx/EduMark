@@ -74,7 +74,7 @@ export async function getSubmissionById(submissionId: string) {
   const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('submissions')
-    .select('id, student_id, batch_id, pdf_url, status, students(name, index_no)')
+    .select('id, student_id, batch_id, pdf_url, status, total_awarded, total_max, general_feedback, best_questions_selected, paper_name, students(name, index_no)')
     .eq('id', submissionId)
     .single();
   if (error) throw error;

@@ -17,6 +17,16 @@ reports/            ← generated marking report PDFs (private)
 ```
 All buckets are private. Use `supabase.storage.from(bucket).createSignedUrl(path, 3600)` for temporary access.
 
+### Storage RLS Policy Requirements
+Each bucket needs SELECT + INSERT + UPDATE + DELETE policies scoped to the owning tutor. The `reports` bucket in particular requires an **UPDATE** policy for upsert to work on re-download — without it, the second download attempt returns `POST 400` even though `upsert: true` is set. All four commands must be covered:
+```sql
+-- Pattern (reports bucket example)
+CREATE POLICY "rep_select_own" ON storage.objects FOR SELECT ...
+CREATE POLICY "rep_insert_own" ON storage.objects FOR INSERT ...
+CREATE POLICY "rep_update_own" ON storage.objects FOR UPDATE ...  ← required for upsert
+CREATE POLICY "rep_delete_own" ON storage.objects FOR DELETE ...
+```
+
 ## Native PDF Dispatch to Claude
 Student PDFs are sent directly to Claude using native PDF document blocks (`type: 'document'`, `media_type: 'application/pdf'`). No image conversion is needed — Claude handles PDF rendering and OCR internally.
 
