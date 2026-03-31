@@ -181,7 +181,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (777 tests, 56 files)
+## Current Test Coverage (787 tests, 57 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -196,7 +196,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/pdf/pdf-to-images.test.ts` | 5 | getPdfPageCount: page count, lightweight check, error handling |
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
-| `__tests__/lib/ai/mark-paper.test.ts` | 26 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13+14 present, paperName filters to only matching paper, without paperName includes all papers), buildUserMessageText (7 steps, paper label), markingResultSchema (paper_name, part, sub_questions, best_questions_selected), markingOutputFormat |
+| `__tests__/lib/ai/mark-paper.test.ts` | 26 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13+14+15+16+17 present, paperName filters to only matching paper, without paperName includes all papers), buildUserMessageText (7 steps, paper label, no full transcription in step 2, best-N instruction), markingResultSchema (paper_name, part, sub_questions, best_questions_selected, student_answer_text optional), markingOutputFormat |
 | `__tests__/lib/ai/batch-dispatcher.test.ts` | 34 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback), subject extracted from Supabase single-object FK join (not array). Poll: result parsing, status updates, partial failures, subject extracted from single-object question_papers.subjects join |
 | `__tests__/app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `__tests__/app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
@@ -229,9 +229,10 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/settings/SettingsView.test.tsx` | 17 | Profile card, billing card, edit mode, save/cancel, portal |
 | `__tests__/components/batches/BatchStatusBadge.test.tsx` | 7 | All status styles, fallback, base classes |
 | `__tests__/components/batches/BatchList.test.tsx` | 13 | Loading/error/empty states, links, counts, badges, Create Batch button + dialog, delete batch from card |
-| `__tests__/components/batches/BatchDetail.test.tsx` | 44 | Loading/error/null states, heading, badges, submissions table, View Results toggle, results panel, download/approve buttons, dispatch button, polling, BulkUploader integration, back button, edit batch name, Combined Maths paper selector (shows/hides/non-CM, disables dispatch until selection, enables after selection, sends paper_name in body) |
+| `__tests__/components/batches/BatchDetail.test.tsx` | 44 | Loading/error/null states, heading, badges, submissions table, View Results opens dialog, dialog shows student name, dialog closes on onClose, download/approve buttons, dispatch button, polling, BulkUploader integration, back button, edit batch name, Combined Maths paper selector (shows/hides/non-CM, disables dispatch until selection, enables after selection, sends paper_name in body) |
 | `__tests__/components/batches/BulkUploader.test.tsx` | 25 | Drop zone, file validation, upload, drag-and-drop |
 | `__tests__/components/batches/SubmissionResultsPanel.test.tsx` | 8 | Loading, error, results display, MarkingSummary + QuestionFeedbackCard rendering |
+| `__tests__/components/batches/SubmissionReviewDialog.test.tsx` | 7 | Renders when isOpen=true, hidden when isOpen=false, shows student name in title, renders SubmissionResultsPanel with correct submissionId, Close calls onClose, Approve & Download triggers approve→download fetch, Download Report triggers download fetch |
 | `__tests__/components/marking/QuestionFeedbackCard.test.tsx` | 18 | Read-only render, part badge (Part A/B/null), sub-question breakdown, edit toggle, save/cancel flow, override display, language fonts, OCR badge, saving state |
 | `__tests__/components/marking/MarkingSummary.test.tsx` | 4 | Basic render, percentage, override totals, adjustment note |
 | `__tests__/components/layout/SidebarNav.test.tsx` | 7 | Nav items, logout confirmation dialog, active state |

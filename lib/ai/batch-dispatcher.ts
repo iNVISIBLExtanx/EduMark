@@ -151,7 +151,10 @@ async function dispatchDirect(
           {
             type: 'text' as const,
             text: systemPromptText,
-            cache_control: { type: 'ephemeral' as const },
+            // 1h TTL matches dispatchBatchAPI — Combined Maths papers take 3-8 min each,
+            // so a 10-paper batch spans ~50 min. Without TTL (5-min default), papers
+            // 5-10 miss the cache and re-send the full marking scheme.
+            cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
           },
         ],
         messages: [
@@ -193,7 +196,13 @@ async function dispatchDirect(
           markingResultSchema.parse(JSON.parse(textBlock.text)),
           subject,
         );
-        await saveMarkingResults(sub.id, parsed);
+        // Override paper_name with the authoritative batch value.
+        // Claude tends to invent its own paper name (often in Sinhala or a free-form string).
+        // The canonical value ('Pure (Paper I)' / 'Applied (Paper II)') comes from the batch.
+        const withCorrectPaperName: MarkingResult = paperName
+          ? { ...parsed, paper_name: paperName }
+          : parsed;
+        await saveMarkingResults(sub.id, withCorrectPaperName);
         await updateSubmissionStatus(sub.id, 'marked');
         markedCount++;
       } else {
@@ -381,11 +390,16 @@ export async function pollBatchResults(batchId: string, tutorId: string): Promis
           // Supabase returns FK joins as single objects (many-to-one), not arrays
           const batchSubject = (batch as unknown as { question_papers?: { subjects?: { name?: string } } })
             .question_papers?.subjects?.name ?? 'General';
+          const batchPaperName = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
           const parsed: MarkingResult = sanitizeMarkingResult(
             markingResultSchema.parse(JSON.parse(textBlock.text)),
             batchSubject,
           );
-          await saveMarkingResults(submissionId, parsed);
+          // Override paper_name with the authoritative batch value (same fix as dispatchDirect).
+          const withCorrectPaperName: MarkingResult = batchPaperName
+            ? { ...parsed, paper_name: batchPaperName }
+            : parsed;
+          await saveMarkingResults(submissionId, withCorrectPaperName);
           await updateSubmissionStatus(submissionId, 'marked');
           markedCount++;
         } catch (parseErr) {

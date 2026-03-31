@@ -30,10 +30,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('தமிழ்');
   });
 
-  it('includes 12 explicit marking rules', () => {
+  it('includes explicit marking rules covering feedback structure and scheme citation', () => {
     const prompt = buildSystemPrompt('Physics', 'english', scheme);
     expect(prompt).toContain('<marking_rules>');
     expect(prompt).toContain('ocr_confidence');
+    expect(prompt).toContain('addressing the student directly');
+    expect(prompt).toContain('per scheme');
   });
 
   it('falls back to english for unknown medium', () => {
@@ -110,12 +112,14 @@ describe('buildUserMessageText', () => {
   it('omits paper label when paperName is not provided', () => {
     const text = buildUserMessageText('Physics');
     expect(text).not.toContain('undefined');
-    expect(text).not.toContain(' — ');
+    // Paper label should not appear as "Physics — <paperName>" prefix
+    expect(text).not.toMatch(/^The attached PDF.*Physics —/);
   });
 
-  it('instructs to transcribe student answers', () => {
+  it('references student_answer_text for examiner notes, not full transcription', () => {
     const text = buildUserMessageText('Biology');
     expect(text).toContain('student_answer_text');
+    expect(text).not.toContain("transcribe the student's answer into student_answer_text");
   });
 
   it('instructs to apply best-N selection rule', () => {
@@ -209,6 +213,24 @@ describe('markingResultSchema', () => {
       general_feedback: '',
     };
     expect(() => markingResultSchema.parse(missing)).toThrow();
+  });
+
+  it('accepts a question without student_answer_text (field is optional)', () => {
+    const valid = {
+      paper_name: 'Paper II (Essay)',
+      questions: [{
+        part: 'Part A',
+        question_no: 1,
+        max_marks: 10,
+        awarded_marks: 7,
+        feedback: 'Good',
+        ocr_confidence: 'high' as const,
+      }],
+      total_awarded: 7,
+      total_max: 10,
+      general_feedback: 'Well done',
+    };
+    expect(() => markingResultSchema.parse(valid)).not.toThrow();
   });
 });
 

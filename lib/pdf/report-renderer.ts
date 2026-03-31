@@ -209,16 +209,6 @@ export function buildReportHTML(params: ReportHTMLParams): string {
           <h3>Question ${r.question_no} ${ocrWarning} ${overrideBadge} ${best5Badge} ${notCountedBadge}</h3>
           <span class="marks" style="color: ${marksColor};">${effectiveMarks}/${r.max_marks}</span>
         </div>
-        ${
-          r.student_answer_text
-            ? `
-          <div class="answer-section">
-            <h4>Student Answer</h4>
-            <div class="student-answer lang-text">${escapeHtml(r.student_answer_text)}</div>
-          </div>
-        `
-            : ''
-        }
         <div class="feedback-section">
           <h4>Feedback</h4>
           <div class="feedback lang-text">${escapeHtml(effectiveFeedback)}</div>
@@ -363,18 +353,6 @@ export function buildReportHTML(params: ReportHTMLParams): string {
       color: #6b7280;
       letter-spacing: 0.05em;
       margin-bottom: 4px;
-    }
-
-    .answer-section {
-      margin-bottom: 12px;
-    }
-
-    .student-answer {
-      background-color: #f9fafb;
-      padding: 10px;
-      border-radius: 4px;
-      font-size: 12px;
-      line-height: 1.8;
     }
 
     .feedback {

@@ -277,7 +277,7 @@ const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
 <language_rules>
 - The student has written their answers in Sinhala script.
 - Use the marking scheme context to resolve ambiguous handwritten characters — the expected vocabulary from the scheme helps identify unclear letters.
-- Generate ALL feedback, student_answer_text transcriptions, and general_feedback in Sinhala Unicode script (සිංහල).
+- Generate ALL feedback, student_answer_text examiner notes, and general_feedback in Sinhala Unicode script (සිංහල).
 - Do NOT switch to English or Tamil in any output field.
 - If handwriting is unclear to the point where the answer cannot be interpreted even with scheme guidance, set ocr_confidence to "low" for that question and note what was unclear.
 </language_rules>`,
@@ -286,7 +286,7 @@ const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
 <language_rules>
 - The student has written their answers in Tamil script.
 - Use the marking scheme context to resolve ambiguous handwritten characters — the expected vocabulary from the scheme helps identify unclear letters.
-- Generate ALL feedback, student_answer_text transcriptions, and general_feedback in Tamil script (தமிழ்).
+- Generate ALL feedback, student_answer_text examiner notes, and general_feedback in Tamil script (தமிழ்).
 - Do NOT switch to English or Sinhala in any output field.
 - If handwriting is unclear, set ocr_confidence to "low" and note what was unclear.
 </language_rules>`,
@@ -294,7 +294,7 @@ const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
   english: `
 <language_rules>
 - The student has written their answers in English.
-- Generate ALL feedback, student_answer_text transcriptions, and general_feedback in English.
+- Generate ALL feedback, student_answer_text examiner notes, and general_feedback in English.
 - If handwriting is unclear, set ocr_confidence to "low" and note what was unclear.
 </language_rules>`,
 };
@@ -311,7 +311,7 @@ export const markingResultSchema = z.object({
       question_no: z.number(),
       max_marks: z.number(),
       awarded_marks: z.number(),
-      student_answer_text: z.string(),
+      student_answer_text: z.string().optional(),
       feedback: z.string(),
       ocr_confidence: z.enum(['high', 'low']),
       sub_questions: z.array(
@@ -402,6 +402,9 @@ ${langInstructions}
 12. Do NOT hallucinate answers or assume the student wrote something that is not legible in the image.
 13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question.
 14. The max_marks field MUST exactly match the paper structure. For Combined Maths: Part A questions max_marks = 25, Part B questions max_marks = 150. Never output 10 or any other value for max_marks.
+15. Write feedback addressing the student directly. Structure every feedback entry as: (1) what you did correctly and earned marks for, (2) what was wrong or missing, (3) for any missed marks, the correct answer or approach required by the scheme — cite the specific scheme step or criterion (e.g. 'per scheme step 3b').
+16. NEVER write a feedback field without tracing it to a specific marking scheme criterion. Use the format: 'per scheme [criterion/step reference]'. If the scheme uses numbered steps, cite the step number. If the scheme uses lettered criteria, cite the letter.
+17. Before awarding marks, confirm the question number by cross-referencing the handwritten number with the paper structure. If the question number is ambiguous, state: 'Question number unclear — assumed Q[N] based on position' in the feedback field.
 </marking_rules>
 
 ${partInstructions}
@@ -428,8 +431,8 @@ export function buildUserMessageText(subject: string, paperName?: string): strin
   return `The attached PDF is the complete handwritten answer script for a Sri Lanka A/L ${subject}${paperLabel} paper.
 
 Step 1: Scan each page and identify all question numbers attempted by the student.
-Step 2: For each question found, transcribe the student's answer into student_answer_text.
-Step 3: Compare the transcribed answer against the marking scheme criteria.
+Step 2: For each question found, note any key working, formula, or phrase the student wrote that is directly relevant to the mark decision (brief examiner reference only — do NOT transcribe the full answer into student_answer_text).
+Step 3: Compare the student's handwritten answer against the marking scheme criteria.
 Step 4: Award marks per sub-section as defined in the scheme. Sum sub-marks for the question total.
 Step 5: Apply the best-N selection rule if applicable for this subject's Part B.
 Step 6: Write specific feedback per question citing the marking scheme criterion awarded or missed.

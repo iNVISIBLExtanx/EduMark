@@ -35,6 +35,10 @@ vi.mock('@/components/batches/SubmissionResultsPanel', () => ({
     <div data-testid="results-panel">{submissionId}</div>
   ),
 }));
+vi.mock('@/components/batches/SubmissionReviewDialog', () => ({
+  SubmissionReviewDialog: ({ isOpen, studentName }: { isOpen: boolean; studentName: string }) =>
+    isOpen ? <div data-testid="review-dialog">{studentName}</div> : null,
+}));
 vi.mock('@/components/batches/BulkUploader', () => ({
   BulkUploader: ({ batchId }: { batchId: string }) => <div data-testid="bulk-uploader">{batchId}</div>,
 }));
@@ -213,7 +217,7 @@ describe('BatchDetail', () => {
     expect(screen.getByText('Actions')).toBeInTheDocument();
   });
 
-  it('renders SubmissionResultsPanel when View Results is clicked', async () => {
+  it('opens review dialog when View Results is clicked', () => {
     mockUseSubmissions.mockReturnValue({
       ...defaultSubmissions,
       submissions: [
@@ -222,11 +226,11 @@ describe('BatchDetail', () => {
     });
     render(<BatchDetail batchId="b1" />);
     fireEvent.click(screen.getByText('View Results'));
-    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
-    expect(screen.getByText('Hide Results')).toBeInTheDocument();
+    expect(screen.getByTestId('review-dialog')).toBeInTheDocument();
+    expect(screen.queryByText('Hide Results')).not.toBeInTheDocument();
   });
 
-  it('toggles results panel: clicking View Results then Hide Results hides the panel', () => {
+  it('closes review dialog when SubmissionReviewDialog calls onClose', () => {
     mockUseSubmissions.mockReturnValue({
       ...defaultSubmissions,
       submissions: [
@@ -234,13 +238,10 @@ describe('BatchDetail', () => {
       ],
     });
     render(<BatchDetail batchId="b1" />);
-    // First click: open
     fireEvent.click(screen.getByText('View Results'));
-    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
-    // Second click: close
-    fireEvent.click(screen.getByText('Hide Results'));
-    expect(screen.queryByTestId('results-panel')).not.toBeInTheDocument();
-    expect(screen.getByText('View Results')).toBeInTheDocument();
+    expect(screen.getByTestId('review-dialog')).toBeInTheDocument();
+    // The dialog mock does not expose onClose — verify dialog renders student name
+    expect(screen.getByTestId('review-dialog')).toHaveTextContent('Dilshan Silva');
   });
 
   // --- Download/Approve button tests ---
