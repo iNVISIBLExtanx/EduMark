@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import TestimonialsAndTrust from "@/components/marketing/TestimonialsAndTrust";
 
 const subjects = [
   "Combined Maths",
@@ -348,6 +349,9 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* Testimonials and Trust Section */}
+        <TestimonialsAndTrust />
 
         {/* Pricing Section */}
         <section id="pricing" className="py-16 sm:py-24">
