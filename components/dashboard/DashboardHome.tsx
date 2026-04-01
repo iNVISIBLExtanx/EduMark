@@ -1,135 +1,343 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useSubscription } from '@/hooks/useSubscription';
-import { useTutorProfile } from '@/hooks/useTutorProfile';
-import { useBatches } from '@/hooks/useBatches';
-import { AiMinutesBar } from '@/components/billing/AiMinutesBar';
-import { PlanBadge } from '@/components/billing/PlanBadge';
-import { LanguageBadge } from '@/components/shared/LanguageBadge';
-import { BatchStatusBadge } from '@/components/batches/BatchStatusBadge';
-import { UpgradeModal } from '@/components/billing/UpgradeModal';
+import {
+  Zap,
+  Layers,
+  FileCheck,
+  FileUp,
+  Plus,
+  ArrowRight,
+  Loader2,
+  AlertTriangle,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
-export function DashboardHome() {
-  const { subscription, available, isFree, isLoading: subLoading } = useSubscription();
-  const { tutor, error: tutorError, isLoading: tutorLoading } = useTutorProfile();
-  const { batches, error: batchesError, isLoading: batchesLoading } = useBatches();
-  const [showUpgrade, setShowUpgrade] = useState(false);
+interface DashboardHomeProps {
+  tutorName: string;
+  subscription: {
+    plan: 'free' | 'starter' | 'standard' | 'pro' | 'institute';
+    ai_minutes_used: number;
+    ai_minutes_limit: number;
+    subscription_status: 'active' | 'past_due' | 'canceled' | 'trialing';
+    billing_period_end: string | null;
+  };
+  recentBatches: Array<{
+    id: string;
+    name: string;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    total_papers: number;
+    marked_papers: number;
+    created_at: string;
+    subject_name: string | null;
+  }>;
+  isLoading: boolean;
+  onUpgradeClick?: () => void;
+  onCreateBatch?: () => void;
+}
 
-  useEffect(() => {
-    if (available < 5 && isFree) {
-      setShowUpgrade(true);
-    }
-  }, [available, isFree]);
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
-  if (tutorLoading || subLoading || batchesLoading) {
-    return <p className="p-6">Loading...</p>;
+function getPlanBadgeStyle(plan: DashboardHomeProps['subscription']['plan']) {
+  switch (plan) {
+    case 'free':
+      return 'bg-slate-100 text-slate-700';
+    case 'starter':
+      return 'bg-blue-100 text-blue-700';
+    case 'standard':
+      return 'bg-indigo-100 text-indigo-700';
+    case 'pro':
+      return 'bg-purple-100 text-purple-700';
+    case 'institute':
+      return 'bg-amber-100 text-amber-700';
+    default:
+      return 'bg-slate-100 text-slate-700';
   }
+}
 
-  if (tutorError || batchesError) {
+function getStatusBadge(status: 'pending' | 'processing' | 'completed' | 'failed') {
+  switch (status) {
+    case 'pending':
+      return (
+        <Badge variant="secondary" className="bg-slate-100 text-slate-700">
+          Pending
+        </Badge>
+      );
+    case 'processing':
+      return (
+        <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+          <Loader2 data-icon="inline-start" className="animate-spin" />
+          Processing
+        </Badge>
+      );
+    case 'completed':
+      return (
+        <Badge variant="secondary" className="bg-green-100 text-green-700">
+          Completed
+        </Badge>
+      );
+    case 'failed':
+      return (
+        <Badge variant="secondary" className="bg-red-100 text-red-700">
+          Failed
+        </Badge>
+      );
+    default:
+      return null;
+  }
+}
+
+function formatDate(dateString: string): string {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+export function DashboardHome({
+  tutorName,
+  subscription,
+  recentBatches,
+  isLoading,
+  onUpgradeClick,
+  onCreateBatch,
+}: DashboardHomeProps) {
+  const aiMinutesRemaining = subscription.ai_minutes_limit - subscription.ai_minutes_used;
+  const minutesPercentage = (aiMinutesRemaining / subscription.ai_minutes_limit) * 100;
+  const totalPapersMarked = recentBatches.reduce((sum, b) => sum + b.marked_papers, 0);
+  const batchCount = recentBatches.length;
+
+  const getProgressColor = () => {
+    if (minutesPercentage > 50) return 'bg-green-500';
+    if (minutesPercentage > 20) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+
+  const showUpgradeNudge = subscription.plan === 'free' && aiMinutesRemaining < 5;
+
+  if (isLoading) {
     return (
-      <p className="p-6 text-red-600">
-        {tutorError?.message ?? batchesError?.message ?? 'Something went wrong'}
-      </p>
+      <div className="flex flex-col gap-6 p-6 bg-slate-50 min-h-screen">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-5 w-48" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+        </div>
+        <Skeleton className="h-64" />
+      </div>
     );
   }
 
-  const now = new Date();
-  const thisMonthBatches = batches.filter((b) => {
-    const d = new Date(b.created_at);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const totalMarkedThisMonth = thisMonthBatches.reduce((sum, b) => sum + b.marked_papers, 0);
-  const activeBatches = batches.filter((b) => b.status === 'processing').length;
-  const completedBatches = batches.filter((b) => b.status === 'completed').length;
-
-  const recentBatches = batches.slice(0, 5);
-
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold">
-          Welcome, {tutor?.full_name}
-        </h1>
-        <PlanBadge plan={subscription?.plan ?? 'free'} />
-        {tutor?.marking_language && (
-          <LanguageBadge language={tutor.marking_language} />
-        )}
+    <div className="flex flex-col gap-6 p-6 bg-slate-50 min-h-screen">
+      {/* Past Due Banner */}
+      {subscription.subscription_status === 'past_due' && (
+        <div className="flex items-center justify-between gap-4 rounded-lg bg-red-50 border border-red-200 p-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="text-red-600" />
+            <p className="text-red-800 font-medium">
+              Payment failed — update your billing to continue marking papers.
+            </p>
+          </div>
+          <Button variant="destructive" render={<Link href="/settings" />}>
+            Update Billing
+          </Button>
+        </div>
+      )}
+
+      {/* Greeting Header */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-2xl font-bold text-slate-900">
+            {getGreeting()}, {tutorName}
+          </h1>
+          <Badge
+            variant="secondary"
+            className={getPlanBadgeStyle(subscription.plan)}
+          >
+            {subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1)}
+          </Badge>
+        </div>
+        <p className="text-slate-600">Here&apos;s your marking overview</p>
       </div>
 
-      <AiMinutesBar />
+      {/* Stats Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* AI Minutes Remaining */}
+        <Card className="bg-white border-slate-100">
+          <CardContent className="flex flex-col gap-3 pt-4">
+            <div className="flex items-center gap-2 text-slate-600">
+              <Zap className="text-indigo-600" />
+              <span className="text-sm font-medium">AI Minutes Remaining</span>
+            </div>
+            <p className="text-3xl font-bold text-slate-900">{aiMinutesRemaining}</p>
+            <div className="flex flex-col gap-1">
+              <Progress
+                value={minutesPercentage}
+                className="h-2"
+                style={
+                  {
+                    '--progress-background': getProgressColor(),
+                  } as React.CSSProperties
+                }
+              />
+              <p className="text-xs text-slate-500">
+                of {subscription.ai_minutes_limit} this month
+              </p>
+            </div>
+          </CardContent>
+        </Card>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="quick-stats">
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-gray-500">Papers Marked This Month</p>
-            <p className="text-2xl font-bold" data-testid="stat-marked-month">
-              {totalMarkedThisMonth}
-            </p>
+        {/* Batches This Month */}
+        <Card className="bg-white border-slate-100">
+          <CardContent className="flex flex-col gap-3 pt-4">
+            <div className="flex items-center gap-2 text-slate-600">
+              <Layers className="text-indigo-600" />
+              <span className="text-sm font-medium">Batches This Month</span>
+            </div>
+            <p className="text-3xl font-bold text-slate-900">{batchCount}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-gray-500">Active Batches</p>
-            <p className="text-2xl font-bold" data-testid="stat-active-batches">
-              {activeBatches}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-gray-500">Completed Batches</p>
-            <p className="text-2xl font-bold" data-testid="stat-completed-batches">
-              {completedBatches}
-            </p>
+
+        {/* Papers Marked */}
+        <Card className="bg-white border-slate-100">
+          <CardContent className="flex flex-col gap-3 pt-4">
+            <div className="flex items-center gap-2 text-slate-600">
+              <FileCheck className="text-indigo-600" />
+              <span className="text-sm font-medium">Papers Marked</span>
+            </div>
+            <p className="text-3xl font-bold text-slate-900">{totalPapersMarked}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
+      {/* Quick Actions Row */}
+      <div className="flex flex-wrap gap-3">
+        <Button className="bg-indigo-700 hover:bg-indigo-800" render={<Link href="/papers" />}>
+          <FileUp data-icon="inline-start" />
+          Upload Question Paper
+        </Button>
+        <Button variant="outline" onClick={onCreateBatch} render={onCreateBatch ? undefined : <Link href="/batches" />}>
+          <Plus data-icon="inline-start" />
+          Create New Batch
+        </Button>
+        <Button variant="ghost" render={<Link href="/batches" />}>
+          <Layers data-icon="inline-start" />
+          View All Batches
+        </Button>
+      </div>
+
+      {/* Recent Batches Table */}
+      <Card className="bg-white border-slate-100">
         <CardHeader>
           <CardTitle>Recent Batches</CardTitle>
         </CardHeader>
         <CardContent>
           {recentBatches.length === 0 ? (
-            <div className="text-sm text-gray-500">
-              <p>No batches yet. Start by uploading a question paper.</p>
-              <Link href="/papers" className="text-blue-600 hover:underline">
-                Upload a question paper
-              </Link>
+            <div className="flex flex-col items-center justify-center py-12 gap-4">
+              <div className="rounded-full bg-slate-100 p-4">
+                <Layers className="text-slate-400 size-8" />
+              </div>
+              <div className="text-center">
+                <p className="font-medium text-slate-900">No batches yet</p>
+                <p className="text-sm text-slate-500">
+                  Create your first batch to start marking
+                </p>
+              </div>
+              <Button
+                className="bg-indigo-700 hover:bg-indigo-800"
+                onClick={onCreateBatch}
+                render={onCreateBatch ? undefined : <Link href="/batches" />}
+              >
+                Create Batch
+              </Button>
             </div>
           ) : (
-            <div className="space-y-3">
-              {recentBatches.map((batch) => (
-                <Link
-                  key={batch.id}
-                  href={`/batches/${batch.id}`}
-                  className="flex items-center justify-between rounded-lg border p-3 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-medium text-sm">{batch.name}</span>
-                    <BatchStatusBadge status={batch.status} />
-                  </div>
-                  <span className="text-sm text-gray-500">
-                    {batch.marked_papers}/{batch.total_papers} papers
-                  </span>
-                </Link>
-              ))}
-              <Link
-                href="/batches"
-                className="text-sm text-blue-600 hover:underline"
-              >
-                View all batches &rarr;
-              </Link>
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Batch Name</TableHead>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Papers</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentBatches.map((batch) => (
+                  <TableRow key={batch.id}>
+                    <TableCell className="font-medium">{batch.name}</TableCell>
+                    <TableCell className="text-slate-600">
+                      {batch.subject_name ?? '—'}
+                    </TableCell>
+                    <TableCell>{getStatusBadge(batch.status)}</TableCell>
+                    <TableCell className="text-slate-600">
+                      {batch.marked_papers}/{batch.total_papers}
+                    </TableCell>
+                    <TableCell className="text-slate-600">
+                      {formatDate(batch.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        render={<Link href={`/batches/${batch.id}`} />}
+                      >
+                        View
+                        <ArrowRight data-icon="inline-end" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      <UpgradeModal isOpen={showUpgrade} onClose={() => setShowUpgrade(false)} />
+      {/* Upgrade Nudge */}
+      {showUpgradeNudge && (
+        <Card className="bg-amber-50 border-amber-200">
+          <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 py-4">
+            <div className="flex flex-col gap-1">
+              <p className="font-semibold text-amber-900">Running low on AI Minutes</p>
+              <p className="text-sm text-amber-700">
+                You have {aiMinutesRemaining} minute{aiMinutesRemaining !== 1 ? 's' : ''} left on
+                the Free plan. Upgrade to mark more papers.
+              </p>
+            </div>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+              onClick={onUpgradeClick}
+            >
+              Upgrade Now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
