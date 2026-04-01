@@ -17,6 +17,13 @@ vi.mock('@/hooks/useSubscription', () => ({
 vi.mock('@/lib/api-client', () => ({
   apiFetch: vi.fn(),
 }));
+const mockPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}));
+vi.mock('@/components/ui/input', () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+}));
 vi.mock('@/components/batches/BatchStatusBadge', () => ({
   BatchStatusBadge: ({ status }: { status: string }) => <span data-testid="status-badge">{status}</span>,
 }));
@@ -27,6 +34,10 @@ vi.mock('@/components/batches/SubmissionResultsPanel', () => ({
   SubmissionResultsPanel: ({ submissionId }: { submissionId: string }) => (
     <div data-testid="results-panel">{submissionId}</div>
   ),
+}));
+vi.mock('@/components/batches/SubmissionReviewDialog', () => ({
+  SubmissionReviewDialog: ({ isOpen, studentName }: { isOpen: boolean; studentName: string }) =>
+    isOpen ? <div data-testid="review-dialog">{studentName}</div> : null,
 }));
 vi.mock('@/components/batches/BulkUploader', () => ({
   BulkUploader: ({ batchId }: { batchId: string }) => <div data-testid="bulk-uploader">{batchId}</div>,
@@ -48,6 +59,8 @@ vi.mock('lucide-react', () => ({
   Zap: () => <span data-testid="icon-zap" />,
   CheckCircle: () => <span data-testid="icon-check-circle" />,
   XCircle: () => <span data-testid="icon-x-circle" />,
+  ArrowLeft: () => <span data-testid="icon-arrow-left" />,
+  Pencil: () => <span data-testid="icon-pencil" />,
 }));
 vi.mock('@/lib/supabase/client', () => ({
   createBrowserClient: () => ({
@@ -114,7 +127,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockUseBatchDetail.mockReturnValue(defaultBatch);
   mockUseSubmissions.mockReturnValue(defaultSubmissions);
-  mockUseBatchPolling.mockReturnValue({ results: null, isDone: false, error: null });
+  mockUseBatchPolling.mockReturnValue({ pollData: null, isDone: false, error: null });
   mockUseSubscription.mockReturnValue({ available: 40, subscription: { plan: 'starter' }, isFree: false, isLoading: false, error: null, usagePercent: 20, isPastDue: false, mutate: vi.fn() });
 });
 
@@ -204,7 +217,7 @@ describe('BatchDetail', () => {
     expect(screen.getByText('Actions')).toBeInTheDocument();
   });
 
-  it('renders SubmissionResultsPanel when View Results is clicked', async () => {
+  it('opens review dialog when View Results is clicked', () => {
     mockUseSubmissions.mockReturnValue({
       ...defaultSubmissions,
       submissions: [
@@ -213,11 +226,11 @@ describe('BatchDetail', () => {
     });
     render(<BatchDetail batchId="b1" />);
     fireEvent.click(screen.getByText('View Results'));
-    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
-    expect(screen.getByText('Hide Results')).toBeInTheDocument();
+    expect(screen.getByTestId('review-dialog')).toBeInTheDocument();
+    expect(screen.queryByText('Hide Results')).not.toBeInTheDocument();
   });
 
-  it('toggles results panel: clicking View Results then Hide Results hides the panel', () => {
+  it('closes review dialog when SubmissionReviewDialog calls onClose', () => {
     mockUseSubmissions.mockReturnValue({
       ...defaultSubmissions,
       submissions: [
@@ -225,13 +238,10 @@ describe('BatchDetail', () => {
       ],
     });
     render(<BatchDetail batchId="b1" />);
-    // First click: open
     fireEvent.click(screen.getByText('View Results'));
-    expect(screen.getByTestId('results-panel')).toBeInTheDocument();
-    // Second click: close
-    fireEvent.click(screen.getByText('Hide Results'));
-    expect(screen.queryByTestId('results-panel')).not.toBeInTheDocument();
-    expect(screen.getByText('View Results')).toBeInTheDocument();
+    expect(screen.getByTestId('review-dialog')).toBeInTheDocument();
+    // The dialog mock does not expose onClose — verify dialog renders student name
+    expect(screen.getByTestId('review-dialog')).toHaveTextContent('Dilshan Silva');
   });
 
   // --- Download/Approve button tests ---
@@ -338,7 +348,7 @@ describe('BatchDetail', () => {
     fireEvent.click(screen.getByText('Mark Papers'));
 
     await vi.waitFor(() => {
-      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1/dispatch', { method: 'POST' });
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1/dispatch', { method: 'POST', body: '{}' });
     });
   });
 
@@ -420,5 +430,192 @@ describe('BatchDetail', () => {
   it('UpgradeModal is not shown by default', () => {
     render(<BatchDetail batchId="b1" />);
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+  });
+
+  // --- Back button tests ---
+
+  it('renders Back to Batches button', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByText('Back to Batches')).toBeInTheDocument();
+  });
+
+  it('navigates to /batches on back button click', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByText('Back to Batches'));
+    expect(mockPush).toHaveBeenCalledWith('/batches');
+  });
+
+  // --- Edit batch name tests ---
+
+  it('renders edit batch name button', () => {
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByLabelText('Edit batch name')).toBeInTheDocument();
+  });
+
+  it('shows input with current name on edit click', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    const input = screen.getByDisplayValue('Physics 2024 - Class A');
+    expect(input).toBeInTheDocument();
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
+  });
+
+  it('calls PATCH API with new name on save', async () => {
+    mockApiFetch.mockResolvedValue({ updated: true });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    const input = screen.getByDisplayValue('Physics 2024 - Class A');
+    fireEvent.change(input, { target: { value: 'Updated Name' } });
+    fireEvent.click(screen.getByText('Save'));
+
+    await vi.waitFor(() => {
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/batches/b1', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated Name' }),
+      });
+    });
+  });
+
+  it('cancels editing without API call', () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    expect(screen.getByDisplayValue('Physics 2024 - Class A')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Physics 2024 - Class A');
+    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not call API when name is unchanged', async () => {
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.click(screen.getByLabelText('Edit batch name'));
+    fireEvent.click(screen.getByText('Save'));
+    // Give any async handlers time to fire
+    await vi.waitFor(() => {
+      expect(mockApiFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Progressive polling refresh tests ---
+
+  it('calls submissionsMutate when pollData.marked increases during processing', () => {
+    const submissionsMutate = vi.fn();
+    mockUseSubmissions.mockReturnValue({ ...defaultSubmissions, mutate: submissionsMutate });
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'processing', total_papers: 5, marked_papers: 1 },
+    });
+    mockUseBatchPolling.mockReturnValue({ pollData: { status: 'processing', marked: 2, total: 5 }, isDone: false });
+
+    render(<BatchDetail batchId="b1" />);
+
+    expect(submissionsMutate).toHaveBeenCalled();
+  });
+
+  it('does not call submissionsMutate via polling effect when pollData.marked is 0', () => {
+    const submissionsMutate = vi.fn();
+    mockUseSubmissions.mockReturnValue({ ...defaultSubmissions, mutate: submissionsMutate });
+    mockUseBatchPolling.mockReturnValue({ pollData: { status: 'processing', marked: 0, total: 5 }, isDone: false });
+
+    render(<BatchDetail batchId="b1" />);
+
+    expect(submissionsMutate).not.toHaveBeenCalled();
+  });
+
+  // --- Combined Maths paper selector tests ---
+
+  it('shows paper selector for Combined Maths when paper_name is null', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.getByTestId('paper-name-select')).toBeInTheDocument();
+    expect(screen.getByText('Select Paper')).toBeInTheDocument();
+  });
+
+  it('does not show paper selector when paper_name is already set', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: 'Pure (Paper I)',
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('paper-name-select')).not.toBeInTheDocument();
+  });
+
+  it('does not show paper selector for non-Combined Maths subjects', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Physics',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    expect(screen.queryByTestId('paper-name-select')).not.toBeInTheDocument();
+  });
+
+  it('disables dispatch button for Combined Maths when no paper selected', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    const button = screen.getByTestId('dispatch-button');
+    expect(button).toBeDisabled();
+  });
+
+  it('enables dispatch button for Combined Maths after paper is selected', () => {
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    const select = screen.getByTestId('paper-name-select');
+    fireEvent.change(select, { target: { value: 'Applied (Paper II)' } });
+    const button = screen.getByTestId('dispatch-button');
+    expect(button).not.toBeDisabled();
+  });
+
+  it('sends paper_name in dispatch body when paper is selected', async () => {
+    mockApiFetch.mockResolvedValue({ status: 'processing' });
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: {
+        ...defaultBatch.batch,
+        subject_name: 'Combined Maths',
+        paper_name: null,
+      },
+    });
+    render(<BatchDetail batchId="b1" />);
+    fireEvent.change(screen.getByTestId('paper-name-select'), { target: { value: 'Pure (Paper I)' } });
+    fireEvent.click(screen.getByTestId('dispatch-button'));
+
+    await vi.waitFor(() => {
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/api/batches/b1/dispatch',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ paper_name: 'Pure (Paper I)' }),
+        }),
+      );
+    });
   });
 });

@@ -17,32 +17,30 @@ reports/            ← generated marking report PDFs (private)
 ```
 All buckets are private. Use `supabase.storage.from(bucket).createSignedUrl(path, 3600)` for temporary access.
 
-## PDF → Base64 Images (lib/pdf/pdf-to-images.ts)
-Convert PDF pages to PNG images for Claude vision input:
+### Storage RLS Policy Requirements
+Each bucket needs SELECT + INSERT + UPDATE + DELETE policies scoped to the owning tutor. The `reports` bucket in particular requires an **UPDATE** policy for upsert to work on re-download — without it, the second download attempt returns `POST 400` even though `upsert: true` is set. All four commands must be covered:
+```sql
+-- Pattern (reports bucket example)
+CREATE POLICY "rep_select_own" ON storage.objects FOR SELECT ...
+CREATE POLICY "rep_insert_own" ON storage.objects FOR INSERT ...
+CREATE POLICY "rep_update_own" ON storage.objects FOR UPDATE ...  ← required for upsert
+CREATE POLICY "rep_delete_own" ON storage.objects FOR DELETE ...
+```
+
+## Native PDF Dispatch to Claude
+Student PDFs are sent directly to Claude using native PDF document blocks (`type: 'document'`, `media_type: 'application/pdf'`). No image conversion is needed — Claude handles PDF rendering and OCR internally.
+
+See `lib/ai/batch-dispatcher.ts` for the dispatch implementation.
+
+## PDF Utilities (lib/pdf/pdf-to-images.ts)
 
 ```typescript
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
-import { createCanvas } from 'canvas';
-
-interface PdfToImagesResult {
-  images: string[];    // base64 PNG strings (no data: prefix)
-  pageCount: number;
-  warning?: string;    // set when >20 pages
-}
-
-export async function pdfToImages(
-  pdfBuffer: Buffer,
-  options?: { scale?: number }
-): Promise<PdfToImagesResult> { ... }
-
-// Lightweight page count only — no rendering
+// Pure JS page count — parses /Type /Pages /Count from PDF structure
+// No external dependencies (no pdfjs-dist, no canvas)
 export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> { ... }
 ```
 
-## DPI & Quality Notes
-- Scale 2.0 gives ~150 DPI on A4 — sufficient for Claude's OCR
-- For Sinhala/Tamil scripts, recommend 300 DPI: use scale 3.0 if OCR confidence is consistently low
-- If pdf has >20 pages, warn tutor (likely incorrect upload)
+Used during bulk upload (`app/api/submissions/upload/route.ts`) to validate page counts. If PDF has >20 pages, warn tutor (likely incorrect upload).
 
 ## File Size Limits
 - Max 20MB per PDF submission

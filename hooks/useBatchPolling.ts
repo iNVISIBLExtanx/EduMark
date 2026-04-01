@@ -1,14 +1,15 @@
 import useSWR from 'swr';
 
-interface BatchResults {
-  status: string;
-  results: unknown[];
+interface PollData {
+  status: 'processing' | 'completed' | 'failed';
+  marked: number;
+  total: number;
 }
 
 export function useBatchPolling(batchId: string, enabled: boolean) {
-  const { data, error } = useSWR<BatchResults>(
+  const { data, error } = useSWR<PollData>(
     enabled ? `/api/batches/${batchId}/poll` : null,
     { refreshInterval: 15000 }
   );
-  return { results: data, isDone: data?.status === 'completed', error };
+  return { pollData: data, isDone: data?.status === 'completed', error };
 }

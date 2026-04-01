@@ -4,6 +4,8 @@ import {
   getQuestionPapersByTutor,
   getQuestionPaperById,
   createQuestionPaper,
+  getBatchCountByPaper,
+  deleteQuestionPaper,
 } from '@/lib/db/question-papers';
 
 beforeEach(() => {
@@ -13,6 +15,7 @@ beforeEach(() => {
   mockSupabaseClient.eq.mockReturnThis();
   mockSupabaseClient.insert.mockReturnThis();
   mockSupabaseClient.update.mockReturnThis();
+  mockSupabaseClient.delete.mockReturnThis();
   mockSupabaseClient.order.mockReturnThis();
 });
 
@@ -121,5 +124,55 @@ describe('createQuestionPaper', () => {
 
     expect(result.id).toBe('p2');
     expect(result.created_at).toBe('2024-06-01');
+  });
+});
+
+describe('getBatchCountByPaper', () => {
+  it('returns the count of batches for a paper', async () => {
+    mockSupabaseClient.eq.mockResolvedValue({ count: 3, error: null });
+
+    const result = await getBatchCountByPaper('p1');
+
+    expect(result).toBe(3);
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('batches');
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('paper_id', 'p1');
+  });
+
+  it('returns 0 when count is null', async () => {
+    mockSupabaseClient.eq.mockResolvedValue({ count: null, error: null });
+
+    const result = await getBatchCountByPaper('p1');
+
+    expect(result).toBe(0);
+  });
+
+  it('throws on error', async () => {
+    mockSupabaseClient.eq.mockResolvedValue({ count: null, error: { message: 'DB error' } });
+
+    await expect(getBatchCountByPaper('p1')).rejects.toEqual({ message: 'DB error' });
+  });
+});
+
+describe('deleteQuestionPaper', () => {
+  it('deletes a paper scoped to tutor', async () => {
+    // Chain: .from().delete().eq('id').eq('tutor_id') — first eq returns this, second resolves
+    mockSupabaseClient.eq
+      .mockReturnValueOnce(mockSupabaseClient) // .eq('id', paperId) returns this
+      .mockResolvedValueOnce({ error: null });  // .eq('tutor_id', tutorId) resolves
+
+    await deleteQuestionPaper('p1', 'tutor-1');
+
+    expect(mockSupabaseClient.from).toHaveBeenCalledWith('question_papers');
+    expect(mockSupabaseClient.delete).toHaveBeenCalled();
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('id', 'p1');
+    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('tutor_id', 'tutor-1');
+  });
+
+  it('throws on error', async () => {
+    mockSupabaseClient.eq
+      .mockReturnValueOnce(mockSupabaseClient)
+      .mockResolvedValueOnce({ error: { message: 'FK violation' } });
+
+    await expect(deleteQuestionPaper('p1', 'tutor-1')).rejects.toEqual({ message: 'FK violation' });
   });
 });

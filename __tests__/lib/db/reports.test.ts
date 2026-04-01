@@ -128,33 +128,34 @@ describe('createOrUpdateReport', () => {
 });
 
 describe('approveReport', () => {
-  it('updates tutor_approved and approved_at for the submission', async () => {
-    mockSupabaseClient.eq.mockResolvedValue({ error: null });
+  it('upserts tutor_approved and approved_at for the submission', async () => {
+    mockSupabaseClient.upsert.mockResolvedValue({ error: null });
 
     await approveReport('sub-1');
 
     expect(mockSupabaseClient.from).toHaveBeenCalledWith('reports');
-    expect(mockSupabaseClient.update).toHaveBeenCalledWith(
+    expect(mockSupabaseClient.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
+        submission_id: 'sub-1',
         tutor_approved: true,
         approved_at: expect.any(String),
-      })
+      }),
+      { onConflict: 'submission_id' }
     );
-    expect(mockSupabaseClient.eq).toHaveBeenCalledWith('submission_id', 'sub-1');
   });
 
   it('passes a valid ISO timestamp for approved_at', async () => {
-    mockSupabaseClient.eq.mockResolvedValue({ error: null });
+    mockSupabaseClient.upsert.mockResolvedValue({ error: null });
 
     await approveReport('sub-1');
 
-    const updateArg = mockSupabaseClient.update.mock.calls[0][0];
-    expect(new Date(updateArg.approved_at).toISOString()).toBe(updateArg.approved_at);
+    const upsertArg = mockSupabaseClient.upsert.mock.calls[0][0];
+    expect(new Date(upsertArg.approved_at).toISOString()).toBe(upsertArg.approved_at);
   });
 
-  it('throws on update error', async () => {
-    const dbError = { message: 'update failed' };
-    mockSupabaseClient.eq.mockResolvedValue({ error: dbError });
+  it('throws on upsert error', async () => {
+    const dbError = { message: 'upsert failed' };
+    mockSupabaseClient.upsert.mockResolvedValue({ error: dbError });
 
     await expect(approveReport('sub-1')).rejects.toEqual(dbError);
   });

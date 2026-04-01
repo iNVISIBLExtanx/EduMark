@@ -52,7 +52,9 @@ Claude Code must follow this structure and create new files in the correct place
 │       │       ├── poll/route.ts      # GET poll Claude Batch API results
 │       │       └── results/route.ts   # GET all marking results for batch
 │       ├── question-papers/
-│       │   └── route.ts          # GET/POST question papers
+│       │   ├── route.ts          # GET/POST question papers
+│       │   └── [id]/
+│       │       └── route.ts      # DELETE question paper + scheme
 │       ├── marking-schemes/
 │       │   └── route.ts          # POST marking schemes
 │       ├── subjects/
@@ -80,6 +82,7 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── BatchDetail.tsx
 │   │   ├── BatchStatusBadge.tsx
 │   │   ├── BulkUploader.tsx
+│   │   ├── CreateBatchDialog.tsx
 │   │   └── SubmissionResultsPanel.tsx
 │   ├── marking/
 │   │   ├── MarkingSummary.tsx

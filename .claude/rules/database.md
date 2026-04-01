@@ -173,8 +173,11 @@ status          text not null default 'pending'
 claude_batch_id text        -- Anthropic Batch API job ID
 total_papers    int default 0
 marked_papers   int default 0
+paper_name      text        -- e.g. 'Pure (Paper I)' or 'Applied (Paper II)' for Combined Maths
 created_at      timestamptz default now()
 ```
+
+> Added in `supabase/migrations/20260325_mark_paper_schema.sql`.
 
 ---
 
@@ -200,8 +203,17 @@ page_count      int
 status          text not null default 'pending'
                 check (status in ('pending','processing','marked','failed'))
 claude_req_id   text    -- custom_id in Anthropic Batch API request
+-- Summary fields written by saveMarkingResults (service role, background job):
+total_awarded             int
+total_max                 int
+general_feedback          text
+best_questions_selected   jsonb   -- e.g. [1,3,5,6,7] for Combined Maths Part B
+paper_name                text    -- e.g. 'Pure (Paper I)'
 created_at      timestamptz default now()
 ```
+
+> Summary columns added in `supabase/migrations/20260325_mark_paper_schema.sql`.
+> `GET /api/submissions/[id]` returns `{ results, summary }` where `summary` is these fields.
 
 ---
 
@@ -210,17 +222,21 @@ created_at      timestamptz default now()
 ```sql
 id                  uuid primary key default gen_random_uuid()
 submission_id       uuid references submissions(id) on delete cascade
+part                text        -- 'Part A' | 'Part B' | '' (empty for subjects without part structure)
 question_no         int not null
 max_marks           int not null
 awarded_marks       int not null
 student_answer_text text        -- Claude's OCR transcription of student's answer
 feedback            text not null
 ocr_confidence      text default 'high' check (ocr_confidence in ('high','low'))
+sub_questions       jsonb       -- [{label, max_marks, awarded_marks, feedback}] for (a)(i)/(a)(ii) style questions
 tutor_override      boolean default false
 override_marks      int         -- set if tutor manually edited the mark
 override_feedback   text        -- set if tutor manually edited the feedback
 created_at          timestamptz default now()
 ```
+
+> `part` and `sub_questions` added in `supabase/migrations/20260325_mark_paper_schema.sql`.
 
 ---
 
@@ -299,20 +315,46 @@ Rules:
 
 ## Query Functions Reference
 
+### `lib/db/question-papers.ts`
+| Function | Description |
+|----------|-------------|
+| `getQuestionPapersByTutor(tutorId)` | List papers with nested subject + marking_schemes(id) |
+| `getQuestionPaperById(paperId, tutorId)` | Get single paper (ownership check via tutor_id) |
+| `createQuestionPaper(input)` | Insert question paper record |
+| `getBatchCountByPaper(paperId)` | Count batches referencing this paper (used to guard deletion) |
+| `deleteQuestionPaper(paperId, tutorId)` | Delete question paper record (tutor-scoped) |
+
+### `lib/db/marking-schemes.ts`
+| Function | Description |
+|----------|-------------|
+| `getMarkingSchemeByPaper(paperId)` | Get scheme linked to a paper |
+| `createMarkingScheme(input)` | Create scheme record |
+| `getMarkingSchemeById(schemeId)` | Fetch scheme with structure_json |
+| `updateMarkingSchemeStructure(schemeId, structureJson)` | Update parsed structure |
+| `deleteMarkingSchemeByPaper(paperId)` | Delete scheme + its embeddings for a paper, returns `{ id, pdf_url } | null` |
+| `insertEmbeddingChunks(chunks)` | Bulk insert embedding vectors |
+| `deleteEmbeddingsByScheme(schemeId)` | Delete all embeddings for a scheme |
+| `markEmbeddingsDone(schemeId)` | Set embeddings_done flag |
+| `matchMarkingCriteria(schemeId, queryEmbedding, matchCount)` | RAG retrieval via cosine distance |
+
 ### `lib/db/batches.ts`
 | Function | Description |
 |----------|-------------|
 | `getBatchesByTutor(tutorId)` | List batches for a tutor |
-| `getBatchById(batchId, tutorId)` | Get single batch (ownership check via tutor_id) |
+| `getBatchById(batchId, tutorId)` | Get single batch including `paper_name` and nested `question_papers(subjects(name))` join for subject_name (ownership check via tutor_id) |
 | `createBatch(input)` | Create batch with paper, scheme, medium |
 | `updateBatchStatus(batchId, status)` | Update batch status (pending/processing/completed/failed) |
 | `updateBatchClaudeBatchId(batchId, claudeBatchId)` | Save Anthropic Batch API job ID |
+| `updateBatchName(batchId, tutorId, name)` | Update batch name (tutor-scoped ownership check) |
+| `updateBatchPaperName(batchId, tutorId, paperName)` | Store paper name (e.g. 'Pure (Paper I)') on batch — called from dispatch route |
 | `updateBatchMarkedPapers(batchId, markedPapers)` | Update marked paper count |
+| `deleteBatch(batchId, tutorId)` | Delete batch record (tutor-scoped, cascades to students/submissions/results via FK) |
 
 ### `lib/db/submissions.ts`
 | Function | Description |
 |----------|-------------|
 | `getSubmissionsByBatch(batchId)` | List submissions with nested student data |
+| `getSubmissionById(submissionId)` | Get single submission with student data and all summary fields (`total_awarded`, `total_max`, `general_feedback`, `best_questions_selected`, `paper_name`) — used by download route |
 | `createStudentAndSubmission(input)` | Create student + submission atomically |
 | `updateBatchPaperCount(batchId, total)` | Update total_papers count |
 | `updateSubmissionStatus(submissionId, status, claudeReqId?)` | Update submission status + optional claude_req_id |
@@ -321,7 +363,7 @@ Rules:
 ### `lib/db/marking-results.ts`
 | Function | Description |
 |----------|-------------|
-| `getMarkingResultsBySubmission(submissionId)` | Get all marking results for a submission |
-| `getMarkingResultsByBatch(batchId)` | Get all marking results for all submissions in a batch (inner join on submissions) |
-| `saveMarkingResults(submissionId, result)` | Bulk insert marking result rows from parsed Claude JSON |
+| `getMarkingResultsBySubmission(submissionId)` | Get all marking results for a submission (includes `part`, `sub_questions`) |
+| `getMarkingResultsByBatch(batchId)` | Get all marking results for all submissions in a batch (inner join on submissions, includes `part`, `sub_questions`) |
+| `saveMarkingResults(submissionId, result)` | Inserts rows to `marking_results` (with `part`, `sub_questions`); also updates `submissions` with summary fields (`total_awarded`, `total_max`, `general_feedback`, `best_questions_selected`, `paper_name`). Uses service-role client — runs in background job context. |
 | `updateMarkingOverride(resultId, submissionId, overrideMarks, overrideFeedback)` | Update tutor override fields (`tutor_override`, `override_marks`, `override_feedback`) on a marking result row |

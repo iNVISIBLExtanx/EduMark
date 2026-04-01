@@ -1,17 +1,19 @@
 'use client';
 
 import { Fragment, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useBatchDetail } from '@/hooks/useBatchDetail';
 import { useSubmissions } from '@/hooks/useSubmissions';
 import { useBatchPolling } from '@/hooks/useBatchPolling';
 import { useSubscription } from '@/hooks/useSubscription';
 import { BatchStatusBadge } from './BatchStatusBadge';
 import { LanguageBadge } from '@/components/shared/LanguageBadge';
-import { SubmissionResultsPanel } from './SubmissionResultsPanel';
 import { BulkUploader } from './BulkUploader';
+import { SubmissionReviewDialog } from './SubmissionReviewDialog';
 import { UpgradeModal } from '@/components/billing/UpgradeModal';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, Check, Loader2, Zap, CheckCircle, XCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { ArrowLeft, Download, Check, Loader2, Zap, CheckCircle, XCircle, Pencil } from 'lucide-react';
 import { createBrowserClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api-client';
 import {
@@ -24,20 +26,26 @@ import {
 } from '@/components/ui/table';
 
 export function BatchDetail({ batchId }: { batchId: string }) {
+  const router = useRouter();
   const { batch, isLoading, error, mutate } = useBatchDetail(batchId);
   const { submissions, isLoading: submissionsLoading, mutate: submissionsMutate } = useSubmissions(batchId);
   const { available } = useSubscription();
-  const [expandedSubmissionId, setExpandedSubmissionId] = useState<string | null>(null);
+  const [dialogSubmission, setDialogSubmission] = useState<{ id: string; studentName: string } | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [selectedPaperName, setSelectedPaperName] = useState('');
 
-  const { results: pollData, isDone } = useBatchPolling(
+  const { pollData, isDone } = useBatchPolling(
     batchId,
     batch?.status === 'processing'
   );
 
+  // Final refresh when the entire batch completes
   useEffect(() => {
     if (isDone) {
       mutate();
@@ -45,13 +53,17 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     }
   }, [isDone, mutate, submissionsMutate]);
 
+  // Refresh submissions whenever a new paper gets marked during processing,
+  // so newly-marked rows appear immediately without waiting for the full batch to finish.
+  useEffect(() => {
+    if ((pollData?.marked ?? 0) > 0) {
+      submissionsMutate();
+    }
+  }, [pollData?.marked, submissionsMutate]);
+
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;
   if (!batch) return <p className="p-6 text-gray-500">Batch not found</p>;
-
-  const toggleExpand = (submissionId: string) => {
-    setExpandedSubmissionId((prev) => (prev === submissionId ? null : submissionId));
-  };
 
   const getAuthHeaders = async () => {
     const supabase = createBrowserClient();
@@ -63,8 +75,16 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     setDispatchError(null);
     setDispatching(true);
     try {
-      await apiFetch(`/api/batches/${batchId}/dispatch`, { method: 'POST' });
+      const effectivePaperName = batch?.paper_name ?? (selectedPaperName || undefined);
+      const res = await apiFetch<{ status: string }>(`/api/batches/${batchId}/dispatch`, {
+        method: 'POST',
+        body: JSON.stringify(effectivePaperName ? { paper_name: effectivePaperName } : {}),
+      });
       await mutate();
+      // Direct marking completes instantly — also refresh submissions
+      if (res.status === 'completed') {
+        await submissionsMutate();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Dispatch failed';
       try {
@@ -118,6 +138,27 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     }
   };
 
+  const handleSaveName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === batch?.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      await apiFetch(`/api/batches/${batchId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      await mutate();
+      setEditingName(false);
+    } catch {
+      // keep editing on error
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const triggerDownload = async (submissionId: string, headers: Record<string, string>) => {
     const res = await fetch(`/api/reports/${submissionId}/download`, { headers });
     if (!res.ok) {
@@ -135,8 +176,53 @@ export function BatchDetail({ batchId }: { batchId: string }) {
 
   return (
     <div className="p-6 space-y-6">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push('/batches')}
+        className="mb-2"
+      >
+        <ArrowLeft className="h-4 w-4 mr-1" />
+        Back to Batches
+      </Button>
+
       <div>
-        <h1 className="text-2xl font-bold">{batch.name}</h1>
+        <div className="flex items-center gap-2">
+          {editingName ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                maxLength={200}
+                className="text-2xl font-bold h-auto py-1"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveName();
+                  if (e.key === 'Escape') setEditingName(false);
+                }}
+                disabled={savingName}
+              />
+              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
+                {savingName ? 'Saving...' : 'Save'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditingName(false)} disabled={savingName}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold">{batch.name}</h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setNameValue(batch.name); setEditingName(true); }}
+                aria-label="Edit batch name"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-3 mt-2">
           <BatchStatusBadge status={batch.status} />
           <LanguageBadge language={batch.medium} />
@@ -149,9 +235,25 @@ export function BatchDetail({ batchId }: { batchId: string }) {
       {/* Dispatch / Status Section */}
       {batch.status === 'pending' && submissions.length > 0 && (
         <div className="space-y-2">
+          {batch.subject_name === 'Combined Maths' && !batch.paper_name && (
+            <div className="space-y-1">
+              <label className="text-sm font-medium" htmlFor="paper-select">Select Paper</label>
+              <select
+                id="paper-select"
+                value={selectedPaperName}
+                onChange={(e) => setSelectedPaperName(e.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                data-testid="paper-name-select"
+              >
+                <option value="">Choose paper...</option>
+                <option value="Pure (Paper I)">Pure (Paper I)</option>
+                <option value="Applied (Paper II)">Applied (Paper II)</option>
+              </select>
+            </div>
+          )}
           <Button
             onClick={handleDispatch}
-            disabled={dispatching}
+            disabled={dispatching || (batch.subject_name === 'Combined Maths' && !batch.paper_name && !selectedPaperName)}
             data-testid="dispatch-button"
           >
             {dispatching ? (
@@ -179,7 +281,7 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         <div className="flex items-center gap-2 text-blue-600" data-testid="processing-status">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span className="text-sm font-medium">
-            Marking {pollData?.results?.length ?? batch.marked_papers}/{batch.total_papers} papers...
+            Marking {pollData?.marked ?? batch.marked_papers}/{batch.total_papers} papers...
           </span>
         </div>
       )}
@@ -230,7 +332,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
             </TableHeader>
             <TableBody>
               {submissions.map((submission) => {
-                const isExpanded = expandedSubmissionId === submission.id;
                 const isMarked = submission.status === 'marked';
                 const isDownloading = downloadingId === submission.id;
                 return (
@@ -247,14 +348,9 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => toggleExpand(submission.id)}
+                              onClick={() => setDialogSubmission({ id: submission.id, studentName: submission.students.name })}
                             >
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 mr-1" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 mr-1" />
-                              )}
-                              {isExpanded ? 'Hide Results' : 'View Results'}
+                              View Results
                             </Button>
                             <Button
                               variant="ghost"
@@ -288,16 +384,6 @@ export function BatchDetail({ batchId }: { batchId: string }) {
                         )}
                       </TableCell>
                     </TableRow>
-                    {isExpanded && isMarked && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="p-0 px-4 pb-4">
-                          <SubmissionResultsPanel
-                            submissionId={submission.id}
-                            language={batch.medium}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    )}
                   </Fragment>
                 );
               })}
@@ -306,6 +392,15 @@ export function BatchDetail({ batchId }: { batchId: string }) {
         )}
       </div>
 
+      {dialogSubmission && (
+        <SubmissionReviewDialog
+          submissionId={dialogSubmission.id}
+          studentName={dialogSubmission.studentName}
+          language={batch.medium}
+          isOpen={!!dialogSubmission}
+          onClose={() => setDialogSubmission(null)}
+        />
+      )}
       <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </div>
   );

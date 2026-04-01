@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BatchList } from '@/components/batches/BatchList';
 
 vi.mock('@/hooks/useBatches', () => ({
@@ -16,8 +16,33 @@ vi.mock('next/link', () => ({
     <a href={href} {...props}>{children}</a>
   ),
 }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+vi.mock('@/components/batches/CreateBatchDialog', () => ({
+  CreateBatchDialog: ({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) =>
+    open ? <div data-testid="create-batch-dialog"><button onClick={() => onOpenChange(false)}>Close</button></div> : null,
+}));
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
+    open ? <div data-testid="delete-dialog">{children}</div> : null,
+  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('@/components/ui/button', () => ({
+  Button: ({ children, onClick, ...props }: React.PropsWithChildren<{ onClick?: (e?: React.MouseEvent) => void }>) => (
+    <button onClick={onClick} {...props}>{children}</button>
+  ),
+}));
+vi.mock('@/lib/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
 
 import { useBatches } from '@/hooks/useBatches';
+import { apiFetch } from '@/lib/api-client';
 
 const mockUseBatches = useBatches as ReturnType<typeof vi.fn>;
 
@@ -87,5 +112,56 @@ describe('BatchList', () => {
     render(<BatchList />);
     expect(screen.getByText('Physics 2024 - Class A')).toBeInTheDocument();
     expect(screen.getByText('Chemistry 2024')).toBeInTheDocument();
+  });
+
+  it('renders Create Batch button', () => {
+    render(<BatchList />);
+    expect(screen.getByText('Create Batch')).toBeInTheDocument();
+  });
+
+  it('opens CreateBatchDialog when Create Batch button is clicked', () => {
+    render(<BatchList />);
+    expect(screen.queryByTestId('create-batch-dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Create Batch'));
+    expect(screen.getByTestId('create-batch-dialog')).toBeInTheDocument();
+  });
+
+  // --- Delete batch from card ---
+
+  it('renders delete button on each batch card', () => {
+    render(<BatchList />);
+    expect(screen.getByLabelText('Delete Physics 2024 - Class A')).toBeInTheDocument();
+    expect(screen.getByLabelText('Delete Chemistry 2024')).toBeInTheDocument();
+  });
+
+  it('opens delete dialog when trash icon is clicked', () => {
+    render(<BatchList />);
+    expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Delete Physics 2024 - Class A'));
+    expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+    expect(screen.getByText('Delete Batch')).toBeInTheDocument();
+  });
+
+  it('calls DELETE API and refreshes on confirm', async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ deleted: true });
+    render(<BatchList />);
+    fireEvent.click(screen.getByLabelText('Delete Physics 2024 - Class A'));
+    fireEvent.click(screen.getByText('Delete'));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/batches/b1', { method: 'DELETE' });
+      expect(defaultReturn.mutate).toHaveBeenCalled();
+    });
+  });
+
+  it('shows error in delete dialog on failure', async () => {
+    vi.mocked(apiFetch).mockRejectedValue(new Error('Cannot delete a batch while it is being processed.'));
+    render(<BatchList />);
+    fireEvent.click(screen.getByLabelText('Delete Physics 2024 - Class A'));
+    fireEvent.click(screen.getByText('Delete'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Cannot delete a batch while it is being processed.')).toBeInTheDocument();
+    });
   });
 });

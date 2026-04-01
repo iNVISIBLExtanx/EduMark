@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useMarkingResults } from '@/hooks/useMarkingResults';
 import { MarkingSummary } from '@/components/marking/MarkingSummary';
 import { QuestionFeedbackCard } from '@/components/marking/QuestionFeedbackCard';
@@ -10,15 +11,22 @@ interface SubmissionResultsPanelProps {
 }
 
 export function SubmissionResultsPanel({ submissionId, language }: SubmissionResultsPanelProps) {
-  const { results, isLoading, error, mutate } = useMarkingResults(submissionId);
+  const { results, summary, isLoading, error, mutate } = useMarkingResults(submissionId);
+  // Tracks marks being typed right now (before save) keyed by result.id
+  const [draftMarks, setDraftMarks] = useState<Record<string, number>>({});
 
   if (isLoading) return <p className="text-gray-500 py-2">Loading results...</p>;
   if (error) return <p className="text-red-600 py-2">Error loading results: {error.message}</p>;
   if (results.length === 0) return <p className="text-gray-500 py-2">No results available.</p>;
 
-  const totalAwarded = results.reduce((sum, r) => sum + r.awarded_marks, 0);
-  const totalMax = results.reduce((sum, r) => sum + r.max_marks, 0);
-  const overrideTotal = results.reduce((sum, r) => {
+  // Prefer server-computed summary; fall back to local calculation for backward compat
+  const totalAwarded = summary?.total_awarded ?? results.reduce((sum, r) => sum + r.awarded_marks, 0);
+  const totalMax = summary?.total_max ?? results.reduce((sum, r) => sum + r.max_marks, 0);
+
+  // Live total: uses draftMarks while editing, then saved override, then AI-awarded marks.
+  // Updates in real-time as the tutor types — no save needed for the total to reflect changes.
+  const liveTotal = results.reduce((sum, r) => {
+    if (r.id in draftMarks) return sum + draftMarks[r.id];
     if (r.tutor_override && r.override_marks !== null) return sum + r.override_marks;
     return sum + r.awarded_marks;
   }, 0);
@@ -28,7 +36,7 @@ export function SubmissionResultsPanel({ submissionId, language }: SubmissionRes
       <MarkingSummary
         totalAwarded={totalAwarded}
         totalMax={totalMax}
-        overrideTotal={overrideTotal}
+        overrideTotal={liveTotal}
       />
       <div className="space-y-3">
         {results.map((result) => (
@@ -36,17 +44,24 @@ export function SubmissionResultsPanel({ submissionId, language }: SubmissionRes
             key={result.id}
             id={result.id}
             submissionId={submissionId}
+            part={result.part}
             questionNo={result.question_no}
             maxMarks={result.max_marks}
             awardedMarks={result.awarded_marks}
             feedback={result.feedback}
             studentAnswerText={result.student_answer_text}
             ocrConfidence={result.ocr_confidence}
+            subQuestions={result.sub_questions}
             tutorOverride={result.tutor_override}
             overrideMarks={result.override_marks}
             overrideFeedback={result.override_feedback}
             language={language}
-            onSaved={() => mutate()}
+            onMarksChange={(m) => setDraftMarks((prev) => ({ ...prev, [result.id]: m }))}
+            onSaved={() => {
+              // Clear draft for this card then re-fetch fresh server data
+              setDraftMarks((prev) => { const next = { ...prev }; delete next[result.id]; return next; });
+              mutate();
+            }}
           />
         ))}
       </div>

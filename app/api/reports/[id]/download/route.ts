@@ -56,6 +56,13 @@ export async function GET(
     const subjectName = subjects?.name ?? 'General';
 
     // Build HTML and generate PDF
+    const submissionSummary = submission as unknown as {
+      paper_name?: string | null;
+      general_feedback?: string | null;
+      best_questions_selected?: number[] | null;
+      total_awarded?: number | null;
+      total_max?: number | null;
+    };
     const html = buildReportHTML({
       studentName: student.name,
       indexNo: student.index_no,
@@ -64,6 +71,11 @@ export async function GET(
       language: batch.medium as 'sinhala' | 'tamil' | 'english',
       tutorName: tutor.full_name,
       results,
+      paperName: submissionSummary.paper_name,
+      generalFeedback: submissionSummary.general_feedback,
+      bestQuestionsSelected: submissionSummary.best_questions_selected,
+      totalAwarded: submissionSummary.total_awarded,
+      totalMax: submissionSummary.total_max,
     });
 
     const pdfBuffer = await generateReportPDF(html);

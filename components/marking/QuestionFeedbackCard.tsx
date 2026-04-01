@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Pencil, Save, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
+import type { SubQuestion } from '@/hooks/useMarkingResults';
 
 const FONT_CLASS: Record<string, string> = {
   sinhala: 'font-sinhala leading-loose',
@@ -16,33 +17,39 @@ const FONT_CLASS: Record<string, string> = {
 interface QuestionFeedbackProps {
   id: string;
   submissionId: string;
+  part: string | null;
   questionNo: number;
   maxMarks: number;
   awardedMarks: number;
   feedback: string;
   studentAnswerText: string;
   ocrConfidence: string;
+  subQuestions: SubQuestion[] | null;
   tutorOverride: boolean;
   overrideMarks: number | null;
   overrideFeedback: string | null;
   language: string;
   onSaved: () => void;
+  onMarksChange?: (marks: number) => void;
 }
 
 export function QuestionFeedbackCard({
   id,
   submissionId,
+  part,
   questionNo,
   maxMarks,
   awardedMarks,
   feedback,
   studentAnswerText,
   ocrConfidence,
+  subQuestions,
   tutorOverride,
   overrideMarks,
   overrideFeedback,
   language,
   onSaved,
+  onMarksChange,
 }: QuestionFeedbackProps) {
   const [editing, setEditing] = useState(false);
   const [marks, setMarks] = useState(overrideMarks ?? awardedMarks);
@@ -74,15 +81,22 @@ export function QuestionFeedbackCard({
   };
 
   const handleCancel = () => {
-    setMarks(overrideMarks ?? awardedMarks);
+    const original = overrideMarks ?? awardedMarks;
+    setMarks(original);
     setFeedbackText(overrideFeedback ?? feedback);
     setEditing(false);
+    onMarksChange?.(original);
   };
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
+          {part && (
+            <Badge variant="outline" className="bg-gray-100 text-gray-600 border-gray-300 text-xs">
+              {part}
+            </Badge>
+          )}
           <h3 className="font-medium">Question {questionNo}</h3>
           {ocrConfidence === 'low' && (
             <Badge variant="outline" className="bg-yellow-100 text-yellow-700 border-yellow-300">
@@ -114,6 +128,23 @@ export function QuestionFeedbackCard({
         </div>
       )}
 
+      {subQuestions && subQuestions.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Sub-question Breakdown</p>
+          <div className="space-y-1">
+            {subQuestions.map((sq) => (
+              <div key={sq.label} className="flex items-start gap-2 text-sm">
+                <span className="font-mono text-gray-600 w-14 shrink-0">{sq.label}</span>
+                <span className="text-gray-800 font-medium w-16 shrink-0">
+                  {sq.awarded_marks}/{sq.max_marks}
+                </span>
+                <span className={`text-gray-600 ${fontClass}`}>{sq.feedback}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {editing ? (
         <div className="space-y-3 border-t pt-3">
           <div>
@@ -123,7 +154,11 @@ export function QuestionFeedbackCard({
               min={0}
               max={maxMarks}
               value={marks}
-              onChange={(e) => setMarks(Number(e.target.value))}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setMarks(val);
+                onMarksChange?.(val);
+              }}
             />
           </div>
           <div>
@@ -149,7 +184,13 @@ export function QuestionFeedbackCard({
       ) : (
         <div>
           <p className="text-xs text-gray-500 mb-1">Feedback</p>
-          <p className={`text-sm text-gray-700 ${fontClass}`}>{displayFeedback}</p>
+          <p
+            className={`text-sm text-gray-700 ${fontClass} cursor-pointer rounded px-1 -mx-1 hover:bg-gray-50`}
+            onClick={() => setEditing(true)}
+            title="Click to edit feedback"
+          >
+            {displayFeedback}
+          </p>
         </div>
       )}
     </div>

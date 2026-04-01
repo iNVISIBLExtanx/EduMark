@@ -1,101 +1,294 @@
 import { anthropic } from './claude-client';
-import { buildSystemPrompt, type MarkingResult } from './mark-paper';
+import { buildSystemPrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
 import { getBatchById, updateBatchStatus, updateBatchClaudeBatchId, updateBatchMarkedPapers } from '@/lib/db/batches';
 import { getSubmissionsByBatch, updateSubmissionStatus, getSubmissionPdfBuffer } from '@/lib/db/submissions';
 import { getMarkingSchemeById } from '@/lib/db/marking-schemes';
 import { getQuestionPaperById } from '@/lib/db/question-papers';
 import { checkAndDeductMinutes } from '@/lib/db/billing';
 import { saveMarkingResults } from '@/lib/db/marking-results';
-import { pdfToImages } from '@/lib/pdf/pdf-to-images';
+
+/** Threshold: batches with this many or fewer papers use direct (instant) marking */
+const DIRECT_MARKING_THRESHOLD = 10;
 
 /**
- * Dispatches all pending submissions in a batch to the Claude Batch API.
+ * Defense-in-depth post-parse correction for Combined Maths marking results.
  *
- * Order of operations:
- * 1. Load batch context (submissions, scheme, paper/subject)
- * 2. Deduct AI minutes BEFORE calling Claude
- * 3. Convert PDFs to images
- * 4. Build system prompt with cache_control
- * 5. Submit Batch API job
- * 6. Save claude_batch_id to batch
+ * The AI prompt instructs correct max_marks and BEST-5 selection, but as a
+ * server-side safety net we enforce them here regardless of AI output.
+ *
+ * For all other subjects: no-op, returns result unchanged.
  */
-export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
-  // 1. Load batch and verify ownership
-  const batch = await getBatchById(batchId, tutorId);
+export function sanitizeMarkingResult(result: MarkingResult, subject: string): MarkingResult {
+  if (subject !== 'Combined Maths') return result;
 
-  // 2. Load all pending submissions
+  const partAQuestions = result.questions
+    .filter((q) => q.part === 'Part A' || (q.part === '' && q.question_no <= 10))
+    .map((q) => ({ ...q, part: q.part || 'Part A', max_marks: 25 }));
+
+  const partBQuestions = result.questions
+    .filter((q) => q.part === 'Part B' || (q.part === '' && q.question_no > 10))
+    .map((q) => ({ ...q, part: q.part || 'Part B', max_marks: 150 }));
+
+  // Select best 5 Part B questions by awarded_marks descending
+  const sortedPartB = [...partBQuestions].sort((a, b) => b.awarded_marks - a.awarded_marks);
+  const best5 = sortedPartB.slice(0, 5);
+  const best5Nos = best5.map((q) => q.question_no);
+
+  const totalAwarded =
+    partAQuestions.reduce((s, q) => s + q.awarded_marks, 0) +
+    best5.reduce((s, q) => s + q.awarded_marks, 0);
+  // Combined Maths paper structure is fixed: 10 Part A (×25) + best 5 Part B (×150) = 1000.
+  // total_max is always 1000 regardless of how many questions the student attempted.
+  const totalMax = 10 * 25 + 5 * 150;
+
+  return {
+    ...result,
+    questions: [...partAQuestions, ...partBQuestions],
+    best_questions_selected: best5Nos,
+    total_awarded: totalAwarded,
+    total_max: totalMax,
+  };
+}
+
+/** Max output tokens — set high for Sinhala/Tamil which use ~2-3x more tokens than English */
+const MAX_OUTPUT_TOKENS = 32000;
+
+/**
+ * Loads batch context needed for marking: submissions, scheme, prompt.
+ */
+async function loadMarkingContext(batchId: string, tutorId: string) {
+  const batch = await getBatchById(batchId, tutorId);
   const submissions = await getSubmissionsByBatch(batchId);
   const pendingSubmissions = submissions.filter((s) => s.status === 'pending');
   if (pendingSubmissions.length === 0) {
     throw new Error('no_pending_submissions');
   }
 
-  // 3. Billing gate — deduct BEFORE touching Claude
   await checkAndDeductMinutes(tutorId, pendingSubmissions.length);
 
-  // 4. Set batch to processing
-  await updateBatchStatus(batchId, 'processing');
-
-  // 5. Load marking scheme context
   const scheme = await getMarkingSchemeById(batch.scheme_id);
   const schemeText = scheme.structure_json
     ? JSON.stringify(scheme.structure_json)
     : '';
-
-  // 6. Load paper to get subject name
   const paper = await getQuestionPaperById(batch.paper_id, tutorId);
-  const subjects = (paper as unknown as { subjects?: { name: string }[] }).subjects;
-  const subjectName = subjects?.[0]?.name ?? 'General';
+  // Supabase returns the FK join as a single object (many-to-one), not an array
+  const subjects = (paper as unknown as { subjects?: { name: string } }).subjects;
+  const subjectName = subjects?.name ?? 'General';
+  const paperName: string | undefined = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
+  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText, paperName);
 
-  // 7. Build system prompt (cached across all papers in this batch)
-  const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText);
+  return { batch, pendingSubmissions, systemPromptText, subject: subjectName, paperName };
+}
 
-  // 8. Convert each submission's PDF to base64 images and build requests
+/**
+ * Phase 1: Validates, deducts billing, loads context. Throws on errors.
+ * Must be awaited before responding to the client.
+ */
+export async function prepareMarking(batchId: string, tutorId: string) {
+  return loadMarkingContext(batchId, tutorId);
+}
+
+/**
+ * Phase 2: Executes the actual marking (streaming or Batch API).
+ * Designed to run in the background — errors are logged, not thrown to caller.
+ */
+export async function executeMarking(
+  batchId: string,
+  pendingSubmissions: { id: string; pdf_url: string }[],
+  systemPromptText: string,
+  subject: string,
+  paperName?: string,
+): Promise<string> {
+  if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+  }
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+}
+
+/**
+ * Dispatches marking — validates billing, then marks all papers.
+ * Kept for backward compatibility (tests, etc). Awaits full completion.
+ */
+export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
+  const { pendingSubmissions, systemPromptText, subject, paperName } = await loadMarkingContext(batchId, tutorId);
+
+  if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+  }
+
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+}
+
+/**
+ * Direct marking: calls messages.create() for each paper sequentially.
+ * Results are saved immediately — no polling needed.
+ * Uses structured outputs (output_config.format) for guaranteed valid JSON.
+ */
+async function dispatchDirect(
+  batchId: string,
+  pendingSubmissions: { id: string; pdf_url: string }[],
+  systemPromptText: string,
+  subject: string,
+  paperName?: string,
+): Promise<string> {
+  await updateBatchStatus(batchId, 'processing');
+
+  let markedCount = 0;
+  let failedCount = 0;
+
+  for (const sub of pendingSubmissions) {
+    await updateSubmissionStatus(sub.id, 'processing', sub.id);
+
+    try {
+      const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
+      const pdfBase64 = pdfBuffer.toString('base64');
+
+      // Use streaming to avoid SDK timeout on large PDF + high max_tokens requests.
+      // The SDK requires streaming for requests that may take >10 minutes.
+      const stream = anthropic.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: [
+          {
+            type: 'text' as const,
+            text: systemPromptText,
+            // 1h TTL matches dispatchBatchAPI — Combined Maths papers take 3-8 min each,
+            // so a 10-paper batch spans ~50 min. Without TTL (5-min default), papers
+            // 5-10 miss the cache and re-send the full marking scheme.
+            cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+          },
+        ],
+        messages: [
+          {
+            role: 'user' as const,
+            content: [
+              {
+                type: 'document' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: 'application/pdf' as const,
+                  data: pdfBase64,
+                },
+              },
+              {
+                type: 'text' as const,
+                text: buildUserMessageText(subject, paperName),
+              },
+            ],
+          },
+        ],
+        output_config: {
+          format: markingOutputFormat,
+        },
+      });
+      const response = await stream.finalMessage();
+
+      // Check for truncation — structured output JSON is invalid when truncated
+      if (response.stop_reason === 'max_tokens') {
+        console.error(`[dispatchDirect] Response truncated for submission ${sub.id} (stop_reason: max_tokens)`);
+        await updateSubmissionStatus(sub.id, 'failed');
+        failedCount++;
+        continue;
+      }
+
+      const textBlock = response.content.find((b) => b.type === 'text');
+      if (textBlock && 'text' in textBlock) {
+        const parsed: MarkingResult = sanitizeMarkingResult(
+          markingResultSchema.parse(JSON.parse(textBlock.text)),
+          subject,
+        );
+        // Override paper_name with the authoritative batch value.
+        // Claude tends to invent its own paper name (often in Sinhala or a free-form string).
+        // The canonical value ('Pure (Paper I)' / 'Applied (Paper II)') comes from the batch.
+        const withCorrectPaperName: MarkingResult = paperName
+          ? { ...parsed, paper_name: paperName }
+          : parsed;
+        await saveMarkingResults(sub.id, withCorrectPaperName);
+        await updateSubmissionStatus(sub.id, 'marked');
+        markedCount++;
+      } else {
+        await updateSubmissionStatus(sub.id, 'failed');
+        failedCount++;
+      }
+    } catch (err) {
+      console.error(
+        `[dispatchDirect] Failed for submission ${sub.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+      await updateSubmissionStatus(sub.id, 'failed');
+      failedCount++;
+    }
+
+    await updateBatchMarkedPapers(batchId, markedCount);
+  }
+
+  const finalStatus = failedCount > 0 && markedCount === 0 ? 'failed' : 'completed';
+  await updateBatchStatus(batchId, finalStatus);
+
+  return 'direct';
+}
+
+/**
+ * Batch API marking: submits all papers as a single Batch API job.
+ * 50% cost discount but async — results retrieved via polling.
+ * Uses 1-hour cache TTL for higher cache hit rate across batch processing.
+ * Uses structured outputs (output_config.format) for guaranteed valid JSON.
+ */
+async function dispatchBatchAPI(
+  batchId: string,
+  pendingSubmissions: { id: string; pdf_url: string }[],
+  systemPromptText: string,
+  subject: string,
+  paperName?: string,
+): Promise<string> {
   const requests = await Promise.all(
     pendingSubmissions.map(async (sub) => {
       const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
-      const { images } = await pdfToImages(pdfBuffer);
+      const pdfBase64 = pdfBuffer.toString('base64');
 
       return {
         custom_id: sub.id,
         params: {
           model: 'claude-sonnet-4-6' as const,
-          max_tokens: 4000,
+          max_tokens: MAX_OUTPUT_TOKENS,
           system: [
             {
               type: 'text' as const,
               text: systemPromptText,
-              cache_control: { type: 'ephemeral' as const },
+              cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
             },
           ],
           messages: [
             {
               role: 'user' as const,
               content: [
-                ...images.map((img) => ({
-                  type: 'image' as const,
+                {
+                  type: 'document' as const,
                   source: {
                     type: 'base64' as const,
-                    media_type: 'image/png' as const,
-                    data: img,
+                    media_type: 'application/pdf' as const,
+                    data: pdfBase64,
                   },
-                })),
+                },
                 {
                   type: 'text' as const,
-                  text: 'Mark this paper per the scheme. Return JSON only.',
+                  text: buildUserMessageText(subject, paperName),
                 },
               ],
             },
           ],
+          output_config: {
+            format: markingOutputFormat,
+          },
         },
       };
     }),
   );
 
-  // 9. Submit to Claude Batch API
   const batchJob = await anthropic.beta.messages.batches.create({ requests });
 
-  // 10. Save claude_batch_id and update submission statuses
+  await updateBatchStatus(batchId, 'processing');
+
   await updateBatchClaudeBatchId(batchId, batchJob.id);
   await Promise.all(
     pendingSubmissions.map((sub) =>
@@ -115,6 +308,7 @@ export interface PollResult {
 /**
  * Polls the Claude Batch API for results and stores them when ready.
  *
+ * - If batch is already completed/failed, returns cached result.
  * - If batch is still processing, returns current progress.
  * - If batch has ended, iterates results, parses JSON, saves marking_results,
  *   updates submission statuses, and marks batch as completed.
@@ -122,12 +316,38 @@ export interface PollResult {
 export async function pollBatchResults(batchId: string, tutorId: string): Promise<PollResult> {
   const batch = await getBatchById(batchId, tutorId);
 
+  // Guard: don't re-process already finalized batches
+  if (batch.status === 'completed' || batch.status === 'failed') {
+    return {
+      status: batch.status as 'completed' | 'failed',
+      marked: batch.marked_papers,
+      total: batch.total_papers,
+    };
+  }
+
   if (!batch.claude_batch_id) {
+    // Direct marking (no Batch API) — batch is being processed via streaming.
+    // No claude_batch_id to poll. Return current status from DB.
+    if (batch.status === 'processing') {
+      return {
+        status: 'processing',
+        marked: batch.marked_papers,
+        total: batch.total_papers,
+      };
+    }
     throw new Error('batch_not_dispatched');
   }
 
   // Check Anthropic Batch API status
   const batchJob = await anthropic.beta.messages.batches.retrieve(batch.claude_batch_id);
+
+  console.log('[pollBatchResults] Batch API status:', {
+    batchId: batch.claude_batch_id,
+    processing_status: batchJob.processing_status,
+    request_counts: batchJob.request_counts,
+    created_at: batchJob.created_at,
+    ended_at: batchJob.ended_at,
+  });
 
   if (batchJob.processing_status !== 'ended') {
     return {
@@ -148,17 +368,48 @@ export async function pollBatchResults(batchId: string, tutorId: string): Promis
 
     if (result.result.type === 'succeeded') {
       const message = result.result.message;
+
+      // Check for truncation before parsing
+      if (message.stop_reason === 'max_tokens') {
+        console.error(
+          `[pollBatchResults] Response truncated for submission ${submissionId} (stop_reason: max_tokens)`,
+        );
+        await updateSubmissionStatus(submissionId, 'failed');
+        failedCount++;
+        continue;
+      }
+
       const textBlock = message.content.find(
         (block: { type: string }) => block.type === 'text',
       );
 
       if (textBlock && 'text' in textBlock) {
         try {
-          const parsed: MarkingResult = JSON.parse(textBlock.text);
-          await saveMarkingResults(submissionId, parsed);
+          // With structured outputs, the response is guaranteed valid JSON
+          // matching our schema (when not truncated). Zod parse adds safety.
+          // sanitizeMarkingResult corrects wrong max_marks + recomputes BEST-5 for Combined Maths.
+          // Supabase returns FK joins as single objects (many-to-one), not arrays
+          const batchSubject = (batch as unknown as { question_papers?: { subjects?: { name?: string } } })
+            .question_papers?.subjects?.name ?? 'General';
+          const batchPaperName = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
+          const parsed: MarkingResult = sanitizeMarkingResult(
+            markingResultSchema.parse(JSON.parse(textBlock.text)),
+            batchSubject,
+          );
+          // Override paper_name with the authoritative batch value (same fix as dispatchDirect).
+          const withCorrectPaperName: MarkingResult = batchPaperName
+            ? { ...parsed, paper_name: batchPaperName }
+            : parsed;
+          await saveMarkingResults(submissionId, withCorrectPaperName);
           await updateSubmissionStatus(submissionId, 'marked');
           markedCount++;
-        } catch {
+        } catch (parseErr) {
+          console.error(
+            `[pollBatchResults] Failed to parse result for submission ${submissionId}:`,
+            parseErr instanceof Error ? parseErr.message : parseErr,
+            'Raw text (first 500 chars):',
+            textBlock.text.slice(0, 500),
+          );
           await updateSubmissionStatus(submissionId, 'failed');
           failedCount++;
         }

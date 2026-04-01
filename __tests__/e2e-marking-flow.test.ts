@@ -126,11 +126,9 @@ vi.mock('@/lib/db/submissions', () => ({
 
 // --- Mock PDF processing ---
 const mockGetPdfPageCount = vi.fn();
-const mockPdfToImages = vi.fn();
 
 vi.mock('@/lib/pdf/pdf-to-images', () => ({
   getPdfPageCount: (...args: unknown[]) => mockGetPdfPageCount(...args),
-  pdfToImages: (...args: unknown[]) => mockPdfToImages(...args),
 }));
 
 // --- Mock billing ---
@@ -155,13 +153,19 @@ vi.mock('@/lib/ai/openai-client', () => ({
   },
 }));
 
-// --- Mock Anthropic (Claude Batch API) ---
+// --- Mock Anthropic (Claude Batch API + Direct Messages API) ---
 const mockBatchesCreate = vi.fn();
 const mockBatchesRetrieve = vi.fn();
 const mockBatchesResults = vi.fn();
+const mockMessagesCreate = vi.fn();
+const mockMessagesStream = vi.fn();
 
 vi.mock('@/lib/ai/claude-client', () => ({
   anthropic: {
+    messages: {
+      create: (...args: unknown[]) => mockMessagesCreate(...args),
+      stream: (...args: unknown[]) => mockMessagesStream(...args),
+    },
     beta: {
       messages: {
         batches: {
@@ -790,18 +794,19 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
       const prompt = buildSystemPrompt('Physics', 'sinhala', markingSchemeText);
 
       // Verify prompt contains all critical parts
-      expect(prompt).toContain('expert Sri Lankan A/L Physics examiner');
+      expect(prompt).toContain('expert Sri Lanka G.C.E. Advanced Level Physics examiner');
       expect(prompt).toContain('සිංහල'); // Sinhala script in language instruction
       expect(prompt).toContain('F = ma'); // RAG-retrieved content
       expect(prompt).toContain('Conservation of energy'); // RAG-retrieved content
-      expect(prompt).toContain('"question_no"'); // JSON output schema
-      expect(prompt).toContain('"awarded_marks"'); // JSON output schema
+      expect(prompt).toContain('best_questions_selected');
+      expect(prompt).toContain('ocr_confidence');
     });
 
     it('uses English instructions for English medium', () => {
       const prompt = buildSystemPrompt('Chemistry', 'english', 'Test scheme text');
 
-      expect(prompt).toContain('Generate ALL feedback in English');
+      expect(prompt).toContain('Generate ALL feedback');
+      expect(prompt).toContain('in English');
       expect(prompt).not.toContain('සිංහල');
       expect(prompt).not.toContain('தமிழ்');
     });
@@ -964,9 +969,23 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
 
   // ─── Step 10: Dispatch batch to Claude ──────────────────────
   describe('Step 10: Dispatch batch to Claude Batch API', () => {
-    const CLAUDE_BATCH_ID = 'msgbatch_e2e_test_001';
+    const MOCK_MARKING_RESULT_DISPATCH = {
+      paper_name: 'Physics Paper I',
+      questions: [{
+        part: '',
+        question_no: 1,
+        max_marks: 10,
+        awarded_marks: 7,
+        student_answer_text: 'F=ma',
+        feedback: 'Good understanding',
+        ocr_confidence: 'high' as const,
+      }],
+      total_awarded: 7,
+      total_max: 10,
+      general_feedback: 'Well done',
+    };
 
-    it('dispatches batch and returns claude_batch_id', async () => {
+    it('dispatches batch and returns processing status (two-phase fire-and-forget)', async () => {
       authedUser();
       // Billing gate: active subscription with enough minutes
       mockGetBillingStatus.mockResolvedValue({
@@ -1017,45 +1036,32 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
         subject_id: SUBJECT_ID,
         subjects: [{ name: 'Physics', code: 'PHY' }],
       });
-      // PDF download + conversion
+      // PDF download for native PDF dispatch
       mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.from('fake-pdf'));
-      mockPdfToImages.mockResolvedValue({
-        images: ['base64img1', 'base64img2'],
-        pageCount: 2,
+      // Stream mock for background execution (fire-and-forget)
+      mockMessagesStream.mockReturnValue({
+        finalMessage: () => Promise.resolve({
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT_DISPATCH) }],
+        }),
       });
-      // Claude Batch API
-      mockBatchesCreate.mockResolvedValue({ id: CLAUDE_BATCH_ID });
-      // Save claude_batch_id
-      mockUpdateBatchClaudeBatchId.mockResolvedValue(undefined);
-      // Update submission status
+      // Save marking results + update submission status
+      mockSaveMarkingResults.mockResolvedValue(undefined);
       mockUpdateSubmissionStatus.mockResolvedValue(undefined);
+      mockUpdateBatchMarkedPapers.mockResolvedValue(undefined);
 
       const res = await postDispatch(
         new Request('http://localhost/api/batches/test/dispatch', { method: 'POST' }),
         { params: Promise.resolve({ id: BATCH_ID }) },
       );
 
+      // Two-phase dispatch: route returns immediately with processing status
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.claude_batch_id).toBe(CLAUDE_BATCH_ID);
       expect(body.status).toBe('processing');
 
-      // Verify billing was deducted BEFORE Claude API
+      // Verify billing was deducted BEFORE responding (happens in prepareMarking)
       expect(mockCheckAndDeductMinutes).toHaveBeenCalledWith(TEST_USER.id, 1);
-      expect(mockBatchesCreate).toHaveBeenCalled();
-
-      // Verify batch status set to processing
-      expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'processing');
-
-      // Verify claude_batch_id was saved
-      expect(mockUpdateBatchClaudeBatchId).toHaveBeenCalledWith(BATCH_ID, CLAUDE_BATCH_ID);
-
-      // Verify Batch API request has cache_control on system block
-      const batchCreateArgs = mockBatchesCreate.mock.calls[0][0];
-      expect(batchCreateArgs.requests).toHaveLength(1);
-      expect(batchCreateArgs.requests[0].custom_id).toBe(SUBMISSION_ID);
-      expect(batchCreateArgs.requests[0].params.system[0].cache_control).toEqual({ type: 'ephemeral' });
-      expect(batchCreateArgs.requests[0].params.model).toBe('claude-sonnet-4-6');
     });
 
     it('returns 402 when AI minutes insufficient for batch size', async () => {
@@ -1126,8 +1132,10 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
   // ─── Step 12: Poll batch results (completed) ──────────────
   describe('Step 12: Poll batch results when completed', () => {
     const MOCK_MARKING_RESULT = {
+      paper_name: 'Physics Paper I',
       questions: [
         {
+          part: '',
           question_no: 1,
           max_marks: 10,
           awarded_marks: 7,
@@ -1136,6 +1144,7 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
           ocr_confidence: 'high' as const,
         },
         {
+          part: '',
           question_no: 2,
           max_marks: 15,
           awarded_marks: 12,
@@ -1169,6 +1178,7 @@ describe('E2E: Tutor marking workflow (Phase 1–9)', () => {
             result: {
               type: 'succeeded',
               message: {
+                stop_reason: 'end_turn',
                 content: [{ type: 'text', text: JSON.stringify(MOCK_MARKING_RESULT) }],
               },
             },
@@ -2095,10 +2105,12 @@ describe('Phase 12: Edge cases & error paths', () => {
         result: {
           type: 'succeeded',
           message: {
+            stop_reason: 'end_turn',
             content: [{
               type: 'text',
               text: JSON.stringify({
-                questions: [{ question_no: 1, max_marks: 10, awarded_marks: 8, student_answer_text: 'ans', feedback: 'good', ocr_confidence: 'high' }],
+                paper_name: 'Physics Paper I',
+                questions: [{ part: '', question_no: 1, max_marks: 10, awarded_marks: 8, student_answer_text: 'ans', feedback: 'good', ocr_confidence: 'high' }],
                 total_awarded: 8, total_max: 10, general_feedback: 'Well done',
               }),
             }],
