@@ -123,9 +123,11 @@ Dialog mount at bottom of `BatchDetail.tsx` render:
 
 The dialog contains:
 - `SubmissionResultsPanel` (full results + per-question edit) in a scrollable area
-- Bottom action bar: "Close", "Download Report", "Approve & Download"
+- Header: student name title + X close button (`aria-label="Close"`) on the right
+- Bottom action bar: "Download Report", "Approve & Download"
 - `data-testid="review-dialog"` on `DialogContent`
-- `className="max-w-4xl h-[90vh] flex flex-col p-0"` — fixed height, scrollable body
+- `className="top-0 left-0 translate-x-0 translate-y-0 max-w-none w-screen h-screen rounded-none flex flex-col p-0 gap-0"` — full-screen, overrides the base centering classes via tailwind-merge
+- `showCloseButton={false}` on `DialogContent` — the default base close button is hidden; the X button in the header calls `onClose` instead
 
 ## Combined Maths Paper Selector
 

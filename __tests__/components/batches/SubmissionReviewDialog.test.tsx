@@ -37,6 +37,7 @@ vi.mock('lucide-react', () => ({
   Download: () => <span data-testid="icon-download" />,
   Check: () => <span data-testid="icon-check" />,
   Loader2: () => <span data-testid="icon-loader" />,
+  X: () => <span data-testid="icon-x" />,
 }));
 
 const defaultProps = {
@@ -78,7 +79,7 @@ describe('SubmissionReviewDialog', () => {
 
   it('calls onClose when Close button is clicked', () => {
     render(<SubmissionReviewDialog {...defaultProps} />);
-    fireEvent.click(screen.getByTestId('review-dialog-close'));
+    fireEvent.click(screen.getByLabelText('Close'));
     expect(defaultProps.onClose).toHaveBeenCalledOnce();
   });
 

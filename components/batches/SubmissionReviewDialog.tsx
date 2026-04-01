@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Download, Check } from 'lucide-react';
+import { Loader2, Download, Check, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -87,11 +87,14 @@ export function SubmissionReviewDialog({
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
         data-testid="review-dialog"
-        className="max-w-4xl h-[90vh] flex flex-col p-0"
+        className="top-0 left-0 translate-x-0 translate-y-0 max-w-none w-screen h-screen rounded-none flex flex-col p-0 gap-0"
         showCloseButton={false}
       >
-        <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
-          <DialogTitle>{studentName} — Marking Review</DialogTitle>
+        <DialogHeader className="flex-row items-center justify-between px-6 py-4 border-b shrink-0">
+          <DialogTitle className="text-lg">{studentName} — Marking Review</DialogTitle>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </Button>
         </DialogHeader>
 
         {/* Scrollable results area */}
@@ -99,14 +102,7 @@ export function SubmissionReviewDialog({
           <SubmissionResultsPanel submissionId={submissionId} language={language} />
         </div>
 
-        <DialogFooter className="px-6 pb-6 pt-4 border-t shrink-0">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            data-testid="review-dialog-close"
-          >
-            Close
-          </Button>
+        <DialogFooter className="flex-row justify-end gap-2 px-6 pb-6 pt-4 border-t shrink-0 rounded-none bg-transparent">
           <Button
             variant="outline"
             disabled={!!downloadingId}

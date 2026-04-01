@@ -52,9 +52,9 @@ const defaultTutor = {
 };
 
 const sampleBatches = [
-  { id: 'b1', name: 'Batch 1', status: 'completed', medium: 'english', total_papers: 10, marked_papers: 10, created_at: '2026-03-20' },
-  { id: 'b2', name: 'Batch 2', status: 'processing', medium: 'sinhala', total_papers: 5, marked_papers: 2, created_at: '2026-03-21' },
-  { id: 'b3', name: 'Batch 3', status: 'pending', medium: 'tamil', total_papers: 8, marked_papers: 0, created_at: '2026-03-22' },
+  { id: 'b1', name: 'Batch 1', status: 'completed', medium: 'english', total_papers: 10, marked_papers: 10, created_at: '2026-04-20' },
+  { id: 'b2', name: 'Batch 2', status: 'processing', medium: 'sinhala', total_papers: 5, marked_papers: 2, created_at: '2026-04-21' },
+  { id: 'b3', name: 'Batch 3', status: 'pending', medium: 'tamil', total_papers: 8, marked_papers: 0, created_at: '2026-04-22' },
 ];
 
 const defaultBatches = {

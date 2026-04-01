@@ -171,4 +171,31 @@ describe('QuestionFeedbackCard', () => {
       expect(screen.getByText('Saving...')).toBeInTheDocument();
     });
   });
+
+  it('calls onMarksChange with new value when marks input is changed', () => {
+    const onMarksChange = vi.fn();
+    render(<QuestionFeedbackCard {...defaultProps} onMarksChange={onMarksChange} />);
+    fireEvent.click(screen.getByRole('button')); // enter edit mode
+    const input = screen.getByRole('spinbutton'); // number input
+    fireEvent.change(input, { target: { value: '6' } });
+    expect(onMarksChange).toHaveBeenCalledWith(6);
+  });
+
+  it('calls onMarksChange with original marks on cancel', () => {
+    const onMarksChange = vi.fn();
+    render(<QuestionFeedbackCard {...defaultProps} onMarksChange={onMarksChange} />);
+    fireEvent.click(screen.getByRole('button')); // enter edit mode
+    const input = screen.getByRole('spinbutton');
+    fireEvent.change(input, { target: { value: '3' } }); // change to 3
+    fireEvent.click(screen.getByText('Cancel')); // cancel restores original
+    // Last call should be with original value (awardedMarks=7, no override)
+    const calls = onMarksChange.mock.calls;
+    expect(calls[calls.length - 1][0]).toBe(7);
+  });
+
+  it('enters edit mode when feedback text is clicked', () => {
+    render(<QuestionFeedbackCard {...defaultProps} />);
+    fireEvent.click(screen.getByText('Good attempt at explaining photosynthesis.'));
+    expect(screen.getByText('Save')).toBeInTheDocument();
+  });
 });

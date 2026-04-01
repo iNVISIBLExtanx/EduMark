@@ -980,6 +980,33 @@ describe('sanitizeMarkingResult', () => {
     expect(out.total_max).toBe(1000);
   });
 
+  it('uses fixed total_max of 1000 when fewer than 5 Part B questions attempted', () => {
+    const partA = Array.from({ length: 10 }, (_, i) =>
+      makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+    );
+    const partB = Array.from({ length: 4 }, (_, i) =>
+      makeQuestion({ part: 'Part B', question_no: 11 + i, max_marks: 150, awarded_marks: 100 })
+    );
+    const result = makeResult([...partA, ...partB]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+
+    // total_max must always be 1000, not 850 (the old bug when only 4 Part B attempted)
+    expect(out.total_max).toBe(1000);
+    // total_awarded = Part A (10×20=200) + best 4 Part B (4×100=400) = 600
+    expect(out.total_awarded).toBe(600);
+  });
+
+  it('uses fixed total_max of 1000 when no Part B questions attempted', () => {
+    const partA = Array.from({ length: 10 }, (_, i) =>
+      makeQuestion({ part: 'Part A', question_no: i + 1, max_marks: 25, awarded_marks: 20 })
+    );
+    const result = makeResult([...partA]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+
+    expect(out.total_max).toBe(1000);
+    expect(out.total_awarded).toBe(200); // only Part A marks
+  });
+
   it('infers Part A from question_no ≤ 10 when part is empty string', () => {
     const result = makeResult([
       makeQuestion({ part: '', question_no: 5, max_marks: 10, awarded_marks: 8 }),
