@@ -90,7 +90,9 @@ UI: `BatchDetail.tsx` shows a 'Mark Papers' button when `batch.status === 'pendi
    - `updateBatchStatus(batchId, 'completed')` — or `'failed'` if all results failed
 7. Return `{ status: 'completed' | 'failed', marked, total }`
 
-UI: `useBatchPolling` hook (15s refresh) is wired into `BatchDetail.tsx`. Progress text shows marked/total count during processing. On completion, `useEffect` triggers `mutate()` to refresh batch and submission data.
+UI: `useBatchPolling` hook (15s refresh) is wired into `BatchDetail.tsx`. Progress text shows marked/total count during processing. Two `useEffect`s handle refresh:
+- `isDone` effect: fires once when the full batch completes → calls `mutate()` on both batch and submissions.
+- `pollData?.marked` effect: fires whenever `marked` count increases during processing → calls `submissionsMutate()` immediately so newly-marked rows appear in the submissions table without waiting for the full batch to finish.
 
 ### Step 5.5: Fetch Batch Marking Results
 `GET /api/batches/[id]/results` → returns all marking results for all submissions in the batch.
@@ -100,12 +102,13 @@ Used by `SubmissionResultsPanel.tsx` in `BatchDetail.tsx` to display expandable 
 Checks batch ownership via `getBatchById(id, user.id)` before returning data.
 
 ### Step 6: Tutor Review
-Tutor reviews batch results via expandable rows in `BatchDetail.tsx`:
-- Each marked submission has a "View Results" button that expands `SubmissionResultsPanel.tsx`
+Tutor reviews batch results via `SubmissionReviewDialog` (full-screen modal) opened from the "View Results" button in `BatchDetail.tsx`:
 - `GET /api/submissions/[id]` returns `{ results: MarkingResultRow[], summary: SubmissionSummary }` — consumed by `useMarkingResults` hook
 - `SubmissionResultsPanel` uses `summary.total_awarded` / `summary.total_max` for `MarkingSummary`; falls back to local computation if summary is null (backward compat)
+- **Live total**: `SubmissionResultsPanel` maintains `draftMarks: Record<string, number>` state. `liveTotal` is computed from `draftMarks` (while typing) → saved override → AI marks. Updates in real-time without saving.
 - `QuestionFeedbackCard` shows: Part A/B badge (when `part` is set), question number, student answer (OCR), AI-awarded marks, feedback (language-aware fonts), sub-question breakdown table (when `sub_questions` is present), OCR confidence badge
-- Tutor can click "Edit" on any question to override marks and feedback
+- Tutor can click the Pencil button **or click the feedback text directly** to enter edit mode
+- `onMarksChange?: (marks: number) => void` prop fires on every keystroke in the marks input and on cancel (restoring original) — used by parent to update `draftMarks` for live total
 - `PATCH /api/submissions/[id]/override` saves `result_id`, `override_marks`, `override_feedback` to `marking_results`
 - Override display: "Edited" badge, override values shown instead of AI values, `MarkingSummary` shows "Includes tutor adjustments"
 

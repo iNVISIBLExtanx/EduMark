@@ -30,6 +30,7 @@ interface QuestionFeedbackProps {
   overrideFeedback: string | null;
   language: string;
   onSaved: () => void;
+  onMarksChange?: (marks: number) => void;
 }
 
 export function QuestionFeedbackCard({
@@ -48,6 +49,7 @@ export function QuestionFeedbackCard({
   overrideFeedback,
   language,
   onSaved,
+  onMarksChange,
 }: QuestionFeedbackProps) {
   const [editing, setEditing] = useState(false);
   const [marks, setMarks] = useState(overrideMarks ?? awardedMarks);
@@ -79,9 +81,11 @@ export function QuestionFeedbackCard({
   };
 
   const handleCancel = () => {
-    setMarks(overrideMarks ?? awardedMarks);
+    const original = overrideMarks ?? awardedMarks;
+    setMarks(original);
     setFeedbackText(overrideFeedback ?? feedback);
     setEditing(false);
+    onMarksChange?.(original);
   };
 
   return (
@@ -150,7 +154,11 @@ export function QuestionFeedbackCard({
               min={0}
               max={maxMarks}
               value={marks}
-              onChange={(e) => setMarks(Number(e.target.value))}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setMarks(val);
+                onMarksChange?.(val);
+              }}
             />
           </div>
           <div>
@@ -176,7 +184,13 @@ export function QuestionFeedbackCard({
       ) : (
         <div>
           <p className="text-xs text-gray-500 mb-1">Feedback</p>
-          <p className={`text-sm text-gray-700 ${fontClass}`}>{displayFeedback}</p>
+          <p
+            className={`text-sm text-gray-700 ${fontClass} cursor-pointer rounded px-1 -mx-1 hover:bg-gray-50`}
+            onClick={() => setEditing(true)}
+            title="Click to edit feedback"
+          >
+            {displayFeedback}
+          </p>
         </div>
       )}
     </div>

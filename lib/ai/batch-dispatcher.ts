@@ -37,8 +37,9 @@ export function sanitizeMarkingResult(result: MarkingResult, subject: string): M
   const totalAwarded =
     partAQuestions.reduce((s, q) => s + q.awarded_marks, 0) +
     best5.reduce((s, q) => s + q.awarded_marks, 0);
-  const totalMax =
-    partAQuestions.length * 25 + Math.min(partBQuestions.length, 5) * 150;
+  // Combined Maths paper structure is fixed: 10 Part A (×25) + best 5 Part B (×150) = 1000.
+  // total_max is always 1000 regardless of how many questions the student attempted.
+  const totalMax = 10 * 25 + 5 * 150;
 
   return {
     ...result,

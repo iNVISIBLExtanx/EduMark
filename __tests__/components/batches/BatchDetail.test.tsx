@@ -496,6 +496,32 @@ describe('BatchDetail', () => {
     });
   });
 
+  // --- Progressive polling refresh tests ---
+
+  it('calls submissionsMutate when pollData.marked increases during processing', () => {
+    const submissionsMutate = vi.fn();
+    mockUseSubmissions.mockReturnValue({ ...defaultSubmissions, mutate: submissionsMutate });
+    mockUseBatchDetail.mockReturnValue({
+      ...defaultBatch,
+      batch: { ...defaultBatch.batch, status: 'processing', total_papers: 5, marked_papers: 1 },
+    });
+    mockUseBatchPolling.mockReturnValue({ pollData: { status: 'processing', marked: 2, total: 5 }, isDone: false });
+
+    render(<BatchDetail batchId="b1" />);
+
+    expect(submissionsMutate).toHaveBeenCalled();
+  });
+
+  it('does not call submissionsMutate via polling effect when pollData.marked is 0', () => {
+    const submissionsMutate = vi.fn();
+    mockUseSubmissions.mockReturnValue({ ...defaultSubmissions, mutate: submissionsMutate });
+    mockUseBatchPolling.mockReturnValue({ pollData: { status: 'processing', marked: 0, total: 5 }, isDone: false });
+
+    render(<BatchDetail batchId="b1" />);
+
+    expect(submissionsMutate).not.toHaveBeenCalled();
+  });
+
   // --- Combined Maths paper selector tests ---
 
   it('shows paper selector for Combined Maths when paper_name is null', () => {

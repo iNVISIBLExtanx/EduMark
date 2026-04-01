@@ -45,12 +45,21 @@ export function BatchDetail({ batchId }: { batchId: string }) {
     batch?.status === 'processing'
   );
 
+  // Final refresh when the entire batch completes
   useEffect(() => {
     if (isDone) {
       mutate();
       submissionsMutate();
     }
   }, [isDone, mutate, submissionsMutate]);
+
+  // Refresh submissions whenever a new paper gets marked during processing,
+  // so newly-marked rows appear immediately without waiting for the full batch to finish.
+  useEffect(() => {
+    if ((pollData?.marked ?? 0) > 0) {
+      submissionsMutate();
+    }
+  }, [pollData?.marked, submissionsMutate]);
 
   if (isLoading) return <p className="p-6">Loading batch...</p>;
   if (error) return <p className="p-6 text-red-600">Error: {error.message}</p>;

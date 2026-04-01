@@ -89,7 +89,7 @@ For `subject === 'Combined Maths'` only:
 - Corrects wrong `max_marks`: Part A questions → 25, Part B questions → 150 (infers from `part` field; falls back to question_no ≤10 = Part A)
 - Recomputes `best_questions_selected`: top-5 Part B questions by `awarded_marks` descending
 - Recomputes `total_awarded`: sum(Part A awarded) + sum(best-5 Part B awarded)
-- Recomputes `total_max`: (Part A count × 25) + (min(Part B count, 5) × 150)
+- Recomputes `total_max`: always `10 * 25 + 5 * 150 = 1000` — Combined Maths paper structure is fixed regardless of how many Part B questions the student attempted (a student answering only 4 Part B questions still has total_max = 1000, not 850)
 
 For all other subjects: returns result unchanged.
 
