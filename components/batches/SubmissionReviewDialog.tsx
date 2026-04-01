@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Download, Check, X } from 'lucide-react';
+import { Loader2, Download, Check, X, AlertTriangle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,13 @@ export function SubmissionReviewDialog({
   onClose,
 }: SubmissionReviewDialogProps) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  function getErrorMessage(raw: string): string {
+    if (raw === 'report_not_approved') return 'Please approve this report before downloading.';
+    if (raw === 'submission_not_marked') return 'This submission has not been marked yet.';
+    return raw;
+  }
 
   const getAuthHeaders = async () => {
     const supabase = createBrowserClient();
@@ -52,6 +59,7 @@ export function SubmissionReviewDialog({
   };
 
   const handleApproveAndDownload = async () => {
+    setActionError(null);
     setDownloadingId('approve');
     try {
       const headers = await getAuthHeaders();
@@ -65,29 +73,30 @@ export function SubmissionReviewDialog({
       }
       await triggerDownload(headers);
     } catch (err) {
-      console.error('Approve & download error:', err);
+      setActionError(getErrorMessage((err as Error).message));
     } finally {
       setDownloadingId(null);
     }
   };
 
   const handleDownload = async () => {
+    setActionError(null);
     setDownloadingId('download');
     try {
       const headers = await getAuthHeaders();
       await triggerDownload(headers);
     } catch (err) {
-      console.error('Download error:', err);
+      setActionError(getErrorMessage((err as Error).message));
     } finally {
       setDownloadingId(null);
     }
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { setActionError(null); onClose(); } }}>
       <DialogContent
         data-testid="review-dialog"
-        className="top-0 left-0 translate-x-0 translate-y-0 max-w-none w-screen h-screen rounded-none flex flex-col p-0 gap-0"
+        className="top-0 left-0 translate-x-0 translate-y-0 max-w-none sm:max-w-none w-screen h-screen rounded-none flex flex-col p-0 gap-0"
         showCloseButton={false}
       >
         <DialogHeader className="flex-row items-center justify-between px-6 py-4 border-b shrink-0">
@@ -101,6 +110,13 @@ export function SubmissionReviewDialog({
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <SubmissionResultsPanel submissionId={submissionId} language={language} />
         </div>
+
+        {actionError && (
+          <div className="flex items-center gap-2 px-6 py-3 bg-amber-50 border-t border-amber-200 text-amber-800 text-sm shrink-0">
+            <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+            {actionError}
+          </div>
+        )}
 
         <DialogFooter className="flex-row justify-end gap-2 px-6 pb-6 pt-4 border-t shrink-0 rounded-none bg-transparent">
           <Button

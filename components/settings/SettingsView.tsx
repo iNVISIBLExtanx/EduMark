@@ -129,7 +129,7 @@ export function SettingsView({
     ai_minutes_limit: hookSubscription.ai_minutes_limit ?? 0,
     subscription_status: hookSubscription.subscription_status ?? 'active',
     billing_period_end: hookSubscription.billing_period_end ?? null,
-    stripe_customer_id: hookSubscription.stripe_customer_id ?? null,
+    stripe_customer_id: null,
   } : null);
 
   const isSaving = propIsSaving ?? saving;

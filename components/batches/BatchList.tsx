@@ -182,11 +182,9 @@ function BatchCard({
             <span>{formatDate(batch.created_at)}</span>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href={`/batches/${batch.id}`}>
-                View
-                <ArrowRight data-icon="inline-end" />
-              </Link>
+            <Button variant="ghost" size="sm" render={<Link href={`/batches/${batch.id}`} />}>
+              View
+              <ArrowRight data-icon="inline-end" />
             </Button>
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <AlertDialogTrigger

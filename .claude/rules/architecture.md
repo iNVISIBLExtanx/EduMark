@@ -62,6 +62,7 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── submissions/
 │       │   ├── upload/route.ts   # bulk PDF upload endpoint
 │       │   └── [id]/
+│       │       ├── route.ts          # GET { results, summary } for a submission
 │       │       └── override/route.ts  # PATCH tutor mark overrides
 │       ├── reports/
 │       │   └── [id]/
@@ -134,7 +135,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── claude-client.ts
 │   │   ├── mark-paper.ts
 │   │   ├── batch-dispatcher.ts
-│   │   └── embeddings.ts
+│   │   ├── embeddings.ts
+│   │   ├── chunking.ts           # marking scheme text chunking for embeddings
+│   │   └── openai-client.ts      # OpenAI SDK singleton (lazy-init proxy)
 │   ├── stripe/
 │   │   ├── client.ts
 │   │   ├── plans.ts
@@ -187,10 +190,11 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── components/
 │   └── e2e-marking-flow.test.ts  # cross-cutting E2E tests
 │
-├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic)
+├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic, OpenAI)
 │   ├── supabase.ts
 │   ├── stripe.ts
-│   └── anthropic.ts
+│   ├── anthropic.ts
+│   └── openai.ts
 │
 ├── CLAUDE.md
 └── package.json

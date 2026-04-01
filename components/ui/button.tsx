@@ -46,12 +46,19 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  nativeButton,
+  render,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+  // When rendering as a non-button element (e.g. Next.js Link → <a>), suppress the
+  // Base UI native-button warning by defaulting nativeButton to false.
+  const resolvedNativeButton = nativeButton ?? (render === undefined ? true : false);
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      nativeButton={resolvedNativeButton}
+      render={render}
       {...props}
     />
   )

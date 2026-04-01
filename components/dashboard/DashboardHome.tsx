@@ -24,17 +24,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { useSubscription } from '@/hooks/useSubscription';
+import { useBatches } from '@/hooks/useBatches';
 
 interface DashboardHomeProps {
-  tutorName: string;
-  subscription: {
+  tutorName?: string;
+  subscription?: {
     plan: 'free' | 'starter' | 'standard' | 'pro' | 'institute';
     ai_minutes_used: number;
     ai_minutes_limit: number;
     subscription_status: 'active' | 'past_due' | 'canceled' | 'trialing';
     billing_period_end: string | null;
   };
-  recentBatches: Array<{
+  recentBatches?: Array<{
     id: string;
     name: string;
     status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -43,7 +46,7 @@ interface DashboardHomeProps {
     created_at: string;
     subject_name: string | null;
   }>;
-  isLoading: boolean;
+  isLoading?: boolean;
   onUpgradeClick?: () => void;
   onCreateBatch?: () => void;
 }
@@ -55,7 +58,7 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-function getPlanBadgeStyle(plan: DashboardHomeProps['subscription']['plan']) {
+function getPlanBadgeStyle(plan: 'free' | 'starter' | 'standard' | 'pro' | 'institute') {
   switch (plan) {
     case 'free':
       return 'bg-slate-100 text-slate-700';
@@ -113,13 +116,40 @@ function formatDate(dateString: string): string {
 }
 
 export function DashboardHome({
-  tutorName,
-  subscription,
-  recentBatches,
-  isLoading,
+  tutorName: propTutorName,
+  subscription: propSubscription,
+  recentBatches: propRecentBatches,
+  isLoading: propIsLoading,
   onUpgradeClick,
   onCreateBatch,
 }: DashboardHomeProps) {
+  const { tutor, isLoading: tutorLoading } = useTutorProfile();
+  const { subscription: hookSubscription, isLoading: subscriptionLoading } = useSubscription();
+  const { batches: hookBatches, isLoading: batchesLoading } = useBatches();
+
+  const tutorName = propTutorName ?? tutor?.full_name ?? '';
+  const isLoading = propIsLoading ?? (tutorLoading || subscriptionLoading || batchesLoading);
+
+  const subscription = propSubscription ?? (hookSubscription ? {
+    plan: (hookSubscription.plan ?? 'free') as 'free' | 'starter' | 'standard' | 'pro' | 'institute',
+    ai_minutes_used: hookSubscription.ai_minutes_used ?? 0,
+    ai_minutes_limit: hookSubscription.ai_minutes_limit ?? 0,
+    subscription_status: (hookSubscription.subscription_status ?? 'active') as 'active' | 'past_due' | 'canceled' | 'trialing',
+    billing_period_end: hookSubscription.billing_period_end ?? null,
+  } : {
+    plan: 'free' as const,
+    ai_minutes_used: 0,
+    ai_minutes_limit: 0,
+    subscription_status: 'active' as const,
+    billing_period_end: null,
+  });
+
+  const recentBatches = propRecentBatches ?? hookBatches.map((b) => ({
+    ...b,
+    status: b.status as 'pending' | 'processing' | 'completed' | 'failed',
+    subject_name: null,
+  }));
+
   const aiMinutesRemaining = subscription.ai_minutes_limit - subscription.ai_minutes_used;
   const minutesPercentage = (aiMinutesRemaining / subscription.ai_minutes_limit) * 100;
   const totalPapersMarked = recentBatches.reduce((sum, b) => sum + b.marked_papers, 0);
