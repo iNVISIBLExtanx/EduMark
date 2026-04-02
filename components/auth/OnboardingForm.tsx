@@ -25,12 +25,12 @@ import {
 import { cn } from '@/lib/utils';
 
 const SUBJECTS = [
-  { id: 'combined-maths', name: 'Combined Maths', icon: Calculator },
-  { id: 'physics', name: 'Physics', icon: Atom },
-  { id: 'chemistry', name: 'Chemistry', icon: FlaskConical },
-  { id: 'biology', name: 'Biology', icon: Leaf },
-  { id: 'economics', name: 'Economics', icon: TrendingUp },
-  { id: 'business-studies', name: 'Business Studies', icon: Briefcase },
+  { id: 'combined-maths', name: 'Combined Maths', icon: Calculator, comingSoon: false },
+  { id: 'physics', name: 'Physics', icon: Atom, comingSoon: true },
+  { id: 'chemistry', name: 'Chemistry', icon: FlaskConical, comingSoon: true },
+  { id: 'biology', name: 'Biology', icon: Leaf, comingSoon: true },
+  { id: 'economics', name: 'Economics', icon: TrendingUp, comingSoon: true },
+  { id: 'business-studies', name: 'Business Studies', icon: Briefcase, comingSoon: true },
 ] as const;
 
 const LANGUAGES = [
@@ -69,7 +69,7 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
     defaultValues: {
       full_name: defaultName ?? '',
       marking_language: undefined,
-      subject_ids: [],
+      subject_ids: ['combined-maths'],
     },
   });
 
@@ -219,33 +219,40 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
                     <button
                       key={subject.id}
                       type="button"
-                      onClick={() => toggleSubject(subject.id)}
+                      onClick={subject.comingSoon ? undefined : () => toggleSubject(subject.id)}
+                      disabled={subject.comingSoon}
                       className={cn(
                         'relative flex items-center gap-2 rounded-lg border-2 p-3 text-left transition-all',
-                        isSelected
-                          ? 'border-indigo-700 bg-indigo-50'
-                          : 'border-border hover:border-indigo-300 hover:bg-stone-100'
+                        subject.comingSoon
+                          ? 'border-border bg-muted/40 cursor-not-allowed opacity-60'
+                          : isSelected
+                            ? 'border-indigo-700 bg-indigo-50'
+                            : 'border-border hover:border-indigo-300 hover:bg-stone-100'
                       )}
                     >
                       <Icon
                         className={cn(
                           'size-5',
-                          isSelected ? 'text-indigo-700' : 'text-muted-foreground'
+                          subject.comingSoon ? 'text-muted-foreground' : isSelected ? 'text-indigo-700' : 'text-muted-foreground'
                         )}
                       />
                       <span
                         className={cn(
                           'text-sm font-medium',
-                          isSelected ? 'text-indigo-700' : 'text-foreground'
+                          subject.comingSoon ? 'text-muted-foreground' : isSelected ? 'text-indigo-700' : 'text-foreground'
                         )}
                       >
                         {subject.name}
                       </span>
-                      {isSelected && (
+                      {subject.comingSoon ? (
+                        <span className="absolute right-2 top-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          Soon
+                        </span>
+                      ) : isSelected ? (
                         <div className="absolute right-2 top-2 flex size-4 items-center justify-center rounded-full bg-indigo-700 text-white">
                           <Check className="size-3" />
                         </div>
-                      )}
+                      ) : null}
                     </button>
                   );
                 })}
