@@ -6,17 +6,12 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { apiFetch } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { Check, Zap, Loader2 } from 'lucide-react';
 
 const PLANS = ['free', 'starter', 'standard', 'pro', 'institute'] as const;
 type PlanName = (typeof PLANS)[number];
-
-const PLAN_RANK: Record<PlanName, number> = {
-  free: 0,
-  starter: 1,
-  standard: 2,
-  pro: 3,
-  institute: 4,
-};
 
 const PLAN_PRICE_ID_KEYS: Record<Exclude<PlanName, 'free'>, string> = {
   starter: 'starter',
@@ -25,30 +20,59 @@ const PLAN_PRICE_ID_KEYS: Record<Exclude<PlanName, 'free'>, string> = {
   institute: 'institute',
 };
 
-export function PricingTable() {
-  const { subscription, isLoading, error } = useSubscription();
+const FEATURES = [
+  'All 6 A/L subjects',
+  'Sinhala / Tamil / English',
+  'PDF reports',
+  'Tutor override',
+  'Batch marking',
+];
+
+const FAQ_ITEMS = [
+  {
+    question: 'What is an AI Minute?',
+    answer: 'One AI Minute = one student paper marked. Each paper is processed by Claude AI against your uploaded marking scheme.',
+  },
+  {
+    question: 'Do unused minutes roll over?',
+    answer: 'No, AI minutes expire at the end of your billing month. Top-ups also expire at month-end.',
+  },
+  {
+    question: 'Can I change my plan?',
+    answer: 'Yes, you can upgrade or downgrade anytime from your Settings page. Changes take effect immediately.',
+  },
+];
+
+export interface PricingTableProps {
+  currentPlan?: string;
+  onSubscribe?: (priceId: string) => void;
+  onTopUp?: () => void;
+  isLoading?: boolean;
+}
+
+export function PricingTable({
+  currentPlan: propCurrentPlan,
+  onSubscribe,
+  onTopUp,
+  isLoading: propIsLoading,
+}: PricingTableProps) {
+  const { subscription, isLoading: subscriptionLoading, error } = useSubscription();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6 text-center text-red-600">
-        Failed to load subscription data. Please try again.
-      </div>
-    );
-  }
-
-  const currentPlan = (subscription?.plan ?? 'free') as PlanName;
+  const isLoading = propIsLoading || subscriptionLoading;
+  const currentPlan = (propCurrentPlan ?? subscription?.plan ?? 'free') as PlanName;
 
   async function handleCheckout(planName: string, isTopUp = false) {
+    if (onSubscribe && !isTopUp) {
+      onSubscribe(planName);
+      return;
+    }
+    if (onTopUp && isTopUp) {
+      onTopUp();
+      return;
+    }
+
     setCheckoutError(null);
     setLoadingPlan(isTopUp ? 'topup' : planName);
     try {
@@ -66,96 +90,195 @@ export function PricingTable() {
     }
   }
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="size-6 animate-spin text-slate-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 text-center text-red-600">
+        Failed to load subscription data. Please try again.
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Pricing</h1>
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-        {PLANS.map((plan) => {
-          const isCurrent = plan === currentPlan;
-          const isUpgrade = PLAN_RANK[plan] > PLAN_RANK[currentPlan];
-          const isDowngrade = PLAN_RANK[plan] < PLAN_RANK[currentPlan] && plan !== 'free';
+    <div className="min-h-screen bg-[#FAFAF8] px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        {/* Page Header */}
+        <div className="mb-12 text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-800 sm:text-4xl">
+            Choose Your Plan
+          </h1>
+          <p className="mt-3 text-lg text-slate-600">
+            1 AI Minute = 1 student paper marked. All plans include every feature.
+          </p>
+          <p className="mt-2 text-sm text-slate-500">
+            Supports Sinhala &bull; Tamil &bull; English marking
+          </p>
+        </div>
 
-          return (
-            <Card key={plan} className={isCurrent ? 'ring-2 ring-primary' : ''}>
-              <CardHeader>
-                <CardTitle className="capitalize">{plan}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-2xl font-bold">
-                  {PLAN_PRICES_LKR[plan] === 0
-                    ? 'Free'
-                    : `LKR ${PLAN_PRICES_LKR[plan]?.toLocaleString()}`}
-                  <span className="text-sm font-normal text-muted-foreground">/mo</span>
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {PLAN_AI_MINUTES[plan]} AI minutes/month
-                </p>
-              </CardContent>
-              <CardFooter>
-                {isCurrent ? (
-                  <Button variant="outline" disabled className="w-full">
+        {/* Plan Cards */}
+        <div className="flex gap-4 overflow-x-auto pb-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-5">
+          {PLANS.map((plan) => {
+            const isCurrent = plan === currentPlan;
+            const isPopular = plan === 'standard';
+            const price = PLAN_PRICES_LKR[plan];
+            const minutes = PLAN_AI_MINUTES[plan];
+            const isPaid = plan !== 'free';
+            const isProcessing = loadingPlan === (isPaid ? PLAN_PRICE_ID_KEYS[plan as Exclude<PlanName, 'free'>] : plan);
+
+            return (
+              <Card
+                key={plan}
+                className={`relative min-w-[260px] flex-shrink-0 transition-all hover:ring-2 hover:ring-indigo-200 sm:min-w-0 ${
+                  isCurrent ? 'ring-2 ring-green-500' : ''
+                } ${isPopular ? 'ring-2 ring-indigo-700' : ''}`}
+              >
+                {/* Badges */}
+                {isPopular && !isCurrent && (
+                  <Badge className="absolute right-3 top-3 bg-amber-600 text-white hover:bg-amber-600">
+                    Popular
+                  </Badge>
+                )}
+                {isCurrent && (
+                  <Badge className="absolute right-3 top-3 bg-green-600 text-white hover:bg-green-600">
                     Current Plan
-                  </Button>
-                ) : plan === 'free' ? null : isUpgrade ? (
-                  <Button
-                    className="w-full"
-                    disabled={loadingPlan !== null}
-                    onClick={() => handleCheckout(PLAN_PRICE_ID_KEYS[plan as Exclude<PlanName, 'free'>])}
-                  >
-                    {loadingPlan === PLAN_PRICE_ID_KEYS[plan as Exclude<PlanName, 'free'>] ? (
-                      <span className="flex items-center gap-2">
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                        Processing...
-                      </span>
-                    ) : (
-                      'Upgrade'
+                  </Badge>
+                )}
+
+                <CardHeader className="pt-8">
+                  <CardTitle className="text-lg font-semibold capitalize text-slate-800">
+                    {plan}
+                  </CardTitle>
+                </CardHeader>
+
+                <CardContent className="flex flex-col gap-4">
+                  {/* Price */}
+                  <div>
+                    <span className="text-3xl font-bold text-slate-800">
+                      {price === 0 ? 'Free' : `LKR ${price.toLocaleString()}`}
+                    </span>
+                    {price > 0 && (
+                      <span className="text-sm font-normal text-slate-500">/mo</span>
                     )}
-                  </Button>
-                ) : isDowngrade ? (
-                  <Button variant="outline" className="w-full" disabled>
-                    Downgrade via Portal
-                  </Button>
-                ) : null}
-              </CardFooter>
-            </Card>
-          );
-        })}
-      </div>
+                  </div>
 
-      {/* Top-up card */}
-      <div className="mt-6 max-w-sm">
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Up</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Add {TOPUP_MINUTES} AI minutes for LKR {TOPUP_PRICE_LKR.toLocaleString()} (one-time)
-            </p>
-          </CardContent>
-          <CardFooter>
-            <Button
-              variant="secondary"
-              className="w-full"
-              disabled={loadingPlan !== null}
-              onClick={() => handleCheckout('topup', true)}
-            >
-              {loadingPlan === 'topup' ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-600 border-t-transparent" />
-                  Processing...
-                </span>
-              ) : (
-                `Add ${TOPUP_MINUTES} Minutes`
-              )}
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
+                  {/* AI Minutes */}
+                  <p className="text-sm text-slate-600">
+                    <span className="font-medium">{minutes}</span> AI minutes/mo
+                  </p>
 
-      {checkoutError && (
-        <p className="mt-4 text-sm text-red-600">{checkoutError}</p>
-      )}
+                  {/* Features */}
+                  <ul className="flex flex-col gap-2 text-sm text-slate-600">
+                    {FEATURES.map((feature) => (
+                      <li key={feature} className="flex items-center gap-2">
+                        <Check className="size-4 text-indigo-700" />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+
+                <CardFooter className="mt-auto">
+                  {isCurrent ? (
+                    <Button variant="outline" disabled className="w-full">
+                      Current Plan
+                    </Button>
+                  ) : plan === 'free' ? (
+                    <Button
+                      variant="outline"
+                      className="w-full border-indigo-700 text-indigo-700 hover:bg-indigo-50"
+                      disabled={loadingPlan !== null}
+                    >
+                      Get Started Free
+                    </Button>
+                  ) : (
+                    <Button
+                      className="w-full bg-indigo-700 text-white hover:bg-indigo-800"
+                      disabled={loadingPlan !== null}
+                      onClick={() => handleCheckout(PLAN_PRICE_ID_KEYS[plan as Exclude<PlanName, 'free'>])}
+                    >
+                      {isProcessing ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="size-4 animate-spin" />
+                          Processing...
+                        </span>
+                      ) : (
+                        'Subscribe'
+                      )}
+                    </Button>
+                  )}
+                </CardFooter>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Top-Up Section */}
+        <div className="mx-auto mt-12 max-w-xl">
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg text-slate-800">
+                <Zap className="size-5 text-amber-600" />
+                Need More Minutes?
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-slate-700">
+                Add {TOPUP_MINUTES} AI Minutes for{' '}
+                <span className="font-semibold">LKR {TOPUP_PRICE_LKR.toLocaleString()}</span> — one-time, no subscription needed.
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                Top-up minutes are added to your monthly limit and expire at month-end.
+              </p>
+            </CardContent>
+            <CardFooter>
+              <Button
+                className="w-full bg-amber-600 text-white hover:bg-amber-700"
+                disabled={loadingPlan !== null}
+                onClick={() => handleCheckout('topup', true)}
+              >
+                {loadingPlan === 'topup' ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    Processing...
+                  </span>
+                ) : (
+                  'Top Up Now'
+                )}
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+
+        {checkoutError && (
+          <p className="mt-4 text-center text-sm text-red-600">{checkoutError}</p>
+        )}
+
+        {/* FAQ Section */}
+        <div className="mx-auto mt-16 max-w-2xl">
+          <h2 className="mb-6 text-center text-2xl font-semibold text-slate-800">
+            Frequently Asked Questions
+          </h2>
+          <Accordion>
+            {FAQ_ITEMS.map((item, index) => (
+              <AccordionItem key={index} value={`faq-${index}`}>
+                <AccordionTrigger className="text-left font-medium text-slate-800 hover:text-indigo-700 hover:no-underline">
+                  {item.question}
+                </AccordionTrigger>
+                <AccordionContent className="text-slate-600">
+                  {item.answer}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        </div>
+      </div>
     </div>
   );
 }
