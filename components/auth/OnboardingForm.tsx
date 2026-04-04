@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAllSubjects } from '@/hooks/useAllSubjects';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { onboardingSchema, type OnboardingInput } from '@/lib/validations/schemas';
@@ -25,12 +26,12 @@ import {
 import { cn } from '@/lib/utils';
 
 const SUBJECTS = [
-  { id: 'combined-maths', name: 'Combined Maths', icon: Calculator, comingSoon: false },
-  { id: 'physics', name: 'Physics', icon: Atom, comingSoon: true },
-  { id: 'chemistry', name: 'Chemistry', icon: FlaskConical, comingSoon: true },
-  { id: 'biology', name: 'Biology', icon: Leaf, comingSoon: true },
-  { id: 'economics', name: 'Economics', icon: TrendingUp, comingSoon: true },
-  { id: 'business-studies', name: 'Business Studies', icon: Briefcase, comingSoon: true },
+  { name: 'Combined Maths', icon: Calculator, comingSoon: false },
+  { name: 'Physics', icon: Atom, comingSoon: true },
+  { name: 'Chemistry', icon: FlaskConical, comingSoon: true },
+  { name: 'Biology', icon: Leaf, comingSoon: true },
+  { name: 'Economics', icon: TrendingUp, comingSoon: true },
+  { name: 'Business Studies', icon: Briefcase, comingSoon: true },
 ] as const;
 
 const LANGUAGES = [
@@ -57,6 +58,7 @@ const LANGUAGES = [
 export function OnboardingForm({ defaultName }: { defaultName?: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const { subjects: apiSubjects } = useAllSubjects();
 
   const {
     register,
@@ -69,19 +71,27 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
     defaultValues: {
       full_name: defaultName ?? '',
       marking_language: undefined,
-      subject_ids: ['combined-maths'],
+      subject_ids: [],
     },
   });
+
+  // Once the API subjects load, pre-select Combined Maths by its real UUID
+  useEffect(() => {
+    const cm = apiSubjects.find((s) => s.name === 'Combined Maths');
+    if (cm) {
+      setValue('subject_ids', [cm.id], { shouldValidate: true });
+    }
+  }, [apiSubjects, setValue]);
 
   const selectedLanguage = watch('marking_language');
   const selectedSubjects = watch('subject_ids');
   const fullName = watch('full_name');
 
-  const toggleSubject = (id: string) => {
+  const toggleSubject = (uuid: string) => {
     const current = selectedSubjects ?? [];
-    const next = current.includes(id)
-      ? current.filter((s) => s !== id)
-      : [...current, id];
+    const next = current.includes(uuid)
+      ? current.filter((s) => s !== uuid)
+      : [...current, uuid];
     setValue('subject_ids', next, { shouldValidate: true });
   };
 
@@ -214,13 +224,15 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
               <div className="grid grid-cols-2 gap-2">
                 {SUBJECTS.map((subject) => {
                   const Icon = subject.icon;
-                  const isSelected = selectedSubjects?.includes(subject.id);
+                  const apiSubject = apiSubjects.find((s) => s.name === subject.name);
+                  const uuid = apiSubject?.id;
+                  const isSelected = uuid ? selectedSubjects?.includes(uuid) : false;
                   return (
                     <button
-                      key={subject.id}
+                      key={subject.name}
                       type="button"
-                      onClick={subject.comingSoon ? undefined : () => toggleSubject(subject.id)}
-                      disabled={subject.comingSoon}
+                      onClick={subject.comingSoon || !uuid ? undefined : () => toggleSubject(uuid)}
+                      disabled={subject.comingSoon || !uuid}
                       className={cn(
                         'relative flex items-center gap-2 rounded-lg border-2 p-3 text-left transition-all',
                         subject.comingSoon
