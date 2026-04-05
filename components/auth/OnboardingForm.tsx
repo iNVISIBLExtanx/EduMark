@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAllSubjects } from '@/hooks/useAllSubjects';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { onboardingSchema, type OnboardingInput } from '@/lib/validations/schemas';
@@ -25,12 +26,12 @@ import {
 import { cn } from '@/lib/utils';
 
 const SUBJECTS = [
-  { id: 'combined-maths', name: 'Combined Maths', icon: Calculator },
-  { id: 'physics', name: 'Physics', icon: Atom },
-  { id: 'chemistry', name: 'Chemistry', icon: FlaskConical },
-  { id: 'biology', name: 'Biology', icon: Leaf },
-  { id: 'economics', name: 'Economics', icon: TrendingUp },
-  { id: 'business-studies', name: 'Business Studies', icon: Briefcase },
+  { name: 'Combined Maths', icon: Calculator, comingSoon: false },
+  { name: 'Physics', icon: Atom, comingSoon: true },
+  { name: 'Chemistry', icon: FlaskConical, comingSoon: true },
+  { name: 'Biology', icon: Leaf, comingSoon: true },
+  { name: 'Economics', icon: TrendingUp, comingSoon: true },
+  { name: 'Business Studies', icon: Briefcase, comingSoon: true },
 ] as const;
 
 const LANGUAGES = [
@@ -57,6 +58,7 @@ const LANGUAGES = [
 export function OnboardingForm({ defaultName }: { defaultName?: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const { subjects: apiSubjects } = useAllSubjects();
 
   const {
     register,
@@ -73,15 +75,23 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
     },
   });
 
+  // Once the API subjects load, pre-select Combined Maths by its real UUID
+  useEffect(() => {
+    const cm = apiSubjects.find((s) => s.name === 'Combined Maths');
+    if (cm) {
+      setValue('subject_ids', [cm.id], { shouldValidate: true });
+    }
+  }, [apiSubjects, setValue]);
+
   const selectedLanguage = watch('marking_language');
   const selectedSubjects = watch('subject_ids');
   const fullName = watch('full_name');
 
-  const toggleSubject = (id: string) => {
+  const toggleSubject = (uuid: string) => {
     const current = selectedSubjects ?? [];
-    const next = current.includes(id)
-      ? current.filter((s) => s !== id)
-      : [...current, id];
+    const next = current.includes(uuid)
+      ? current.filter((s) => s !== uuid)
+      : [...current, uuid];
     setValue('subject_ids', next, { shouldValidate: true });
   };
 
@@ -214,38 +224,47 @@ export function OnboardingForm({ defaultName }: { defaultName?: string }) {
               <div className="grid grid-cols-2 gap-2">
                 {SUBJECTS.map((subject) => {
                   const Icon = subject.icon;
-                  const isSelected = selectedSubjects?.includes(subject.id);
+                  const apiSubject = apiSubjects.find((s) => s.name === subject.name);
+                  const uuid = apiSubject?.id;
+                  const isSelected = uuid ? selectedSubjects?.includes(uuid) : false;
                   return (
                     <button
-                      key={subject.id}
+                      key={subject.name}
                       type="button"
-                      onClick={() => toggleSubject(subject.id)}
+                      onClick={subject.comingSoon || !uuid ? undefined : () => toggleSubject(uuid)}
+                      disabled={subject.comingSoon || !uuid}
                       className={cn(
                         'relative flex items-center gap-2 rounded-lg border-2 p-3 text-left transition-all',
-                        isSelected
-                          ? 'border-indigo-700 bg-indigo-50'
-                          : 'border-border hover:border-indigo-300 hover:bg-stone-100'
+                        subject.comingSoon
+                          ? 'border-border bg-muted/40 cursor-not-allowed opacity-60'
+                          : isSelected
+                            ? 'border-indigo-700 bg-indigo-50'
+                            : 'border-border hover:border-indigo-300 hover:bg-stone-100'
                       )}
                     >
                       <Icon
                         className={cn(
                           'size-5',
-                          isSelected ? 'text-indigo-700' : 'text-muted-foreground'
+                          subject.comingSoon ? 'text-muted-foreground' : isSelected ? 'text-indigo-700' : 'text-muted-foreground'
                         )}
                       />
                       <span
                         className={cn(
                           'text-sm font-medium',
-                          isSelected ? 'text-indigo-700' : 'text-foreground'
+                          subject.comingSoon ? 'text-muted-foreground' : isSelected ? 'text-indigo-700' : 'text-foreground'
                         )}
                       >
                         {subject.name}
                       </span>
-                      {isSelected && (
+                      {subject.comingSoon ? (
+                        <span className="absolute right-2 top-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          Soon
+                        </span>
+                      ) : isSelected ? (
                         <div className="absolute right-2 top-2 flex size-4 items-center justify-center rounded-full bg-indigo-700 text-white">
                           <Check className="size-3" />
                         </div>
-                      )}
+                      ) : null}
                     </button>
                   );
                 })}

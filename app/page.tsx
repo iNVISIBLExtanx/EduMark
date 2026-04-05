@@ -26,12 +26,12 @@ import {
 import TestimonialsAndTrust from "@/components/marketing/TestimonialsAndTrust";
 
 const subjects = [
-  "Combined Maths",
-  "Physics",
-  "Chemistry",
-  "Biology",
-  "Economics",
-  "Business Studies",
+  { name: "Combined Maths", available: true },
+  { name: "Physics", available: false },
+  { name: "Chemistry", available: false },
+  { name: "Biology", available: false },
+  { name: "Economics", available: false },
+  { name: "Business Studies", available: false },
 ];
 
 const steps = [
@@ -270,14 +270,22 @@ export default function HomePage() {
         <section className="border-y border-border/40 bg-muted/30 py-10 sm:py-12">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
             <p className="mb-4 text-center text-sm font-medium text-muted-foreground">
-              Supports all 6 A/L subjects
+              Supporting A/L subjects — more coming soon
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-              {subjects.map((subject) => (
-                <Badge key={subject} variant="outline" className="px-3 py-1.5 text-sm">
-                  {subject}
-                </Badge>
-              ))}
+              {subjects.map((subject) =>
+                subject.available ? (
+                  <Badge key={subject.name} className="gap-1 px-3 py-1.5 text-sm bg-green-50 text-green-700 border-green-200">
+                    <Check className="size-3" />
+                    {subject.name}
+                  </Badge>
+                ) : (
+                  <Badge key={subject.name} variant="outline" className="px-3 py-1.5 text-sm text-muted-foreground opacity-60">
+                    {subject.name}
+                    <span className="ml-1.5 text-xs">(Coming Soon)</span>
+                  </Badge>
+                )
+              )}
             </div>
             <p className="mt-4 text-center text-sm text-muted-foreground">
               Sinhala • Tamil • English

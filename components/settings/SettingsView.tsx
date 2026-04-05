@@ -9,6 +9,7 @@ import { useTutorSubjects } from '@/hooks/useTutorSubjects';
 import { useAllSubjects } from '@/hooks/useAllSubjects';
 import { useSubscription } from '@/hooks/useSubscription';
 import { apiFetch } from '@/lib/api-client';
+import { cn } from '@/lib/utils';
 import { updateProfileSchema, type UpdateProfileInput } from '@/lib/validations/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -352,18 +353,25 @@ export function SettingsView({
                     <p className="text-sm text-slate-500">Loading subjects...</p>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {(allSubjectsData ?? ALL_SUBJECTS.map((name, i) => ({ id: String(i), name }))).map((subject) => (
-                        <label
-                          key={subject.id}
-                          className="flex items-center gap-2 cursor-pointer"
-                        >
-                          <Checkbox
-                            checked={selectedSubjectIds.includes(subject.id)}
-                            onCheckedChange={(checked) => toggleSubject(subject.id, !!checked)}
-                          />
-                          <span className="text-sm text-slate-700">{subject.name}</span>
-                        </label>
-                      ))}
+                      {(allSubjectsData ?? ALL_SUBJECTS.map((name, i) => ({ id: String(i), name }))).map((subject) => {
+                        const isComingSoon = subject.name !== 'Combined Maths';
+                        return (
+                          <label
+                            key={subject.id}
+                            className={cn('flex items-center gap-2', isComingSoon ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')}
+                          >
+                            <Checkbox
+                              checked={isComingSoon ? false : selectedSubjectIds.includes(subject.id)}
+                              onCheckedChange={isComingSoon ? undefined : (checked) => toggleSubject(subject.id, !!checked)}
+                              disabled={isComingSoon}
+                            />
+                            <span className="text-sm text-slate-700">{subject.name}</span>
+                            {isComingSoon && (
+                              <span className="text-xs text-muted-foreground">(Coming Soon)</span>
+                            )}
+                          </label>
+                        );
+                      })}
                     </div>
                   )}
                   {errors.subject_ids && (
