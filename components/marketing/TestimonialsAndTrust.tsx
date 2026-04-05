@@ -1,40 +1,27 @@
-import Link from "next/link";
-import { Shield, Zap, Globe, RefreshCw, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-const stats = [
-  { value: "6", label: "A/L Subjects Supported", color: "text-indigo-400" },
-  { value: "3", label: "Languages: Sinhala, Tamil, English", color: "text-amber-400" },
-  { value: "50", label: "Papers Per Batch", color: "text-indigo-400" },
-];
+import Link from 'next/link';
+import { Shield, Zap, Globe, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const trustSignals = [
   {
     icon: Shield,
-    title: "Private & Secure",
-    description: "All PDFs stored in encrypted private buckets",
+    title: 'Private & Secure',
+    description: 'All PDFs stored in encrypted private buckets — accessible only by you',
   },
   {
     icon: Zap,
-    title: "Claude AI",
-    description: "Powered by Anthropic's latest model",
+    title: 'State-of-the-Art AI',
+    description: 'Powered by the most advanced AI marking engine available',
   },
   {
     icon: Globe,
     title: "Sri Lanka's A/L Curriculum",
-    description: "Built specifically for local exam formats",
+    description: 'Built specifically for local exam formats — not a generic tool adapted for Sri Lanka',
   },
   {
     icon: RefreshCw,
-    title: "Tutor Control",
-    description: "Review and override any AI mark before publishing",
+    title: 'Tutor Control',
+    description: 'Review and override any AI mark before publishing to students',
   },
 ];
 
@@ -42,24 +29,42 @@ export default function TestimonialsAndTrust() {
   return (
     <section className="bg-slate-900 py-16 sm:py-24">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        {/* Stats Banner */}
+
+        {/* Language Scripts — visual proof of multilingual support */}
         <div className="mb-16 sm:mb-20">
+          <p className="mb-8 text-center text-sm font-medium uppercase tracking-widest text-slate-400">
+            Feedback in your language
+          </p>
           <div className="flex flex-col items-center justify-center gap-8 sm:flex-row sm:gap-0">
-            {stats.map((stat, index) => (
-              <div key={stat.label} className="flex items-center">
-                <div className="text-center px-6 sm:px-12">
-                  <div className={`text-5xl font-bold ${stat.color} sm:text-6xl`}>
-                    {stat.value}
-                  </div>
-                  <div className="mt-2 text-sm text-slate-300 sm:text-base">
-                    {stat.label}
-                  </div>
+            {/* Sinhala */}
+            <div className="flex items-center">
+              <div className="text-center px-8 sm:px-14">
+                <div className="font-sinhala text-4xl font-bold text-indigo-400 sm:text-5xl">
+                  සිංහල
                 </div>
-                {index < stats.length - 1 && (
-                  <div className="hidden h-16 w-px bg-slate-700 sm:block" />
-                )}
+                <div className="mt-2 text-sm text-slate-300">Sinhala</div>
               </div>
-            ))}
+              <div className="hidden h-16 w-px bg-slate-700 sm:block" />
+            </div>
+
+            {/* Tamil */}
+            <div className="flex items-center">
+              <div className="text-center px-8 sm:px-14">
+                <div className="font-tamil text-4xl font-bold text-amber-400 sm:text-5xl">
+                  தமிழ்
+                </div>
+                <div className="mt-2 text-sm text-slate-300">Tamil</div>
+              </div>
+              <div className="hidden h-16 w-px bg-slate-700 sm:block" />
+            </div>
+
+            {/* English */}
+            <div className="text-center px-8 sm:px-14">
+              <div className="text-4xl font-bold text-indigo-400 sm:text-5xl">
+                English
+              </div>
+              <div className="mt-2 text-sm text-slate-300">English</div>
+            </div>
           </div>
         </div>
 
@@ -87,56 +92,10 @@ export default function TestimonialsAndTrust() {
           </div>
         </div>
 
-        {/* Sample Feedback Preview Card */}
-        <div className="mb-16 sm:mb-20">
-          <div className="mx-auto max-w-2xl">
-            <Card className="border-l-4 border-l-indigo-500 border-slate-700 bg-slate-800/80">
-              <CardHeader>
-                <CardTitle className="text-base text-white sm:text-lg">
-                  Sample AI Feedback — Combined Maths Question 3 (Part A)
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Marks Row */}
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-green-400 sm:text-4xl">
-                    22
-                  </span>
-                  <span className="text-xl text-slate-400 sm:text-2xl">
-                    / 25
-                  </span>
-                </div>
-
-                {/* Feedback Text */}
-                <p className="text-sm leading-relaxed text-slate-300">
-                  The student correctly identified the general solution of the
-                  differential equation and applied the boundary condition
-                  accurately. Minor error in the final simplification step —
-                  missing the constant of integration in step 4.
-                </p>
-
-                {/* OCR Confidence Badge */}
-                <div className="flex items-center gap-2">
-                  <Badge className="bg-green-500/20 text-green-400 hover:bg-green-500/30">
-                    <Check className="mr-1 size-3" />
-                    OCR: High
-                  </Badge>
-                </div>
-
-                {/* Note */}
-                <p className="text-xs text-slate-500">
-                  Feedback generated in Sinhala, Tamil, or English based on your
-                  settings
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
         {/* CTA Banner */}
         <div className="rounded-2xl bg-indigo-950/80 px-6 py-10 text-center sm:px-12 sm:py-14">
           <h2 className="text-balance text-2xl font-bold text-white sm:text-3xl">
-            Start Marking Smarter Today
+            Start Marking Your Combined Maths Batch Today
           </h2>
           <p className="mx-auto mt-3 max-w-md text-slate-300">
             Free plan includes 10 AI minutes — no credit card required.
@@ -151,7 +110,7 @@ export default function TestimonialsAndTrust() {
             </Button>
           </div>
           <p className="mt-4 text-sm text-slate-400">
-            Already have an account?{" "}
+            Already have an account?{' '}
             <Link
               href="/login"
               className="text-amber-400 underline-offset-4 hover:underline"
