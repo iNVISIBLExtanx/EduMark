@@ -101,6 +101,10 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   └── DashboardHome.tsx
 │   ├── settings/
 │   │   └── SettingsView.tsx
+│   ├── marketing/
+│   │   ├── TestimonialsAndTrust.tsx   # dark section: language scripts, trust signals, CTA (server component)
+│   │   ├── LanguageShowcase.tsx       # tab switcher: Sinhala/Tamil/English feedback demo ('use client')
+│   │   └── SubjectSpotlight.tsx       # Combined Maths structure card + coming-soon subjects (server component)
 │   └── shared/
 │       ├── LanguageBadge.tsx
 │       └── SubjectBadge.tsx
@@ -222,5 +226,10 @@ Claude Code must follow this structure and create new files in the correct place
   - SWR hooks for client-side read-only data.
 - `components/*`
   - Pure presentational + minor local state only.
+- `components/marketing/*`
+  - Public landing page sections. All static data — no SWR hooks, no API calls.
+  - Server components by default; use `'use client'` only when tabs/interactivity needed (e.g. `LanguageShowcase`).
+  - Never mention specific AI model names (Claude, Anthropic, Sonnet). Use "advanced AI" / "state-of-the-art AI".
+  - No emojis. Sri Lankan identity through copy ("Sri Lanka's A/L"), font classes, and color palette.
 
 Claude Code must keep new code consistent with this tree.
