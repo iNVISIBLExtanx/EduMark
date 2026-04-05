@@ -9,7 +9,9 @@ Currency: LKR -- set `currency: 'lkr'` on all Stripe Price objects.
 
 ## Plans & AI Minutes
 
-1 AI Minute = 1 paper marked (one student PDF processed through Claude).
+1 AI Minute ≈ 1 paper marked (one student PDF processed through the AI engine).
+Actual consumption varies with paper length, student answer script size, and marking scheme complexity.
+In all UI and public-facing copy always say "AI minutes" — never use "papers" as the billing unit.
 
 | Plan       | AI Minutes/mo | Price (LKR/mo) | Stripe Price ID env var           |
 |------------|---------------|----------------|-----------------------------------|

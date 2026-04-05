@@ -62,6 +62,7 @@ Claude Code must follow this structure and create new files in the correct place
 │       ├── submissions/
 │       │   ├── upload/route.ts   # bulk PDF upload endpoint
 │       │   └── [id]/
+│       │       ├── route.ts          # GET { results, summary } for a submission
 │       │       └── override/route.ts  # PATCH tutor mark overrides
 │       ├── reports/
 │       │   └── [id]/
@@ -100,6 +101,10 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   └── DashboardHome.tsx
 │   ├── settings/
 │   │   └── SettingsView.tsx
+│   ├── marketing/
+│   │   ├── TestimonialsAndTrust.tsx   # dark section: language scripts, trust signals, CTA (server component)
+│   │   ├── LanguageShowcase.tsx       # tab switcher: Sinhala/Tamil/English feedback demo ('use client')
+│   │   └── SubjectSpotlight.tsx       # Combined Maths structure card + coming-soon subjects (server component)
 │   └── shared/
 │       ├── LanguageBadge.tsx
 │       └── SubjectBadge.tsx
@@ -134,7 +139,9 @@ Claude Code must follow this structure and create new files in the correct place
 │   │   ├── claude-client.ts
 │   │   ├── mark-paper.ts
 │   │   ├── batch-dispatcher.ts
-│   │   └── embeddings.ts
+│   │   ├── embeddings.ts
+│   │   ├── chunking.ts           # marking scheme text chunking for embeddings
+│   │   └── openai-client.ts      # OpenAI SDK singleton (lazy-init proxy)
 │   ├── stripe/
 │   │   ├── client.ts
 │   │   ├── plans.ts
@@ -187,10 +194,11 @@ Claude Code must follow this structure and create new files in the correct place
 │   ├── components/
 │   └── e2e-marking-flow.test.ts  # cross-cutting E2E tests
 │
-├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic)
+├── __mocks__/                 # Shared test mocks (Supabase, Stripe, Anthropic, OpenAI)
 │   ├── supabase.ts
 │   ├── stripe.ts
-│   └── anthropic.ts
+│   ├── anthropic.ts
+│   └── openai.ts
 │
 ├── CLAUDE.md
 └── package.json
@@ -218,5 +226,10 @@ Claude Code must follow this structure and create new files in the correct place
   - SWR hooks for client-side read-only data.
 - `components/*`
   - Pure presentational + minor local state only.
+- `components/marketing/*`
+  - Public landing page sections. All static data — no SWR hooks, no API calls.
+  - Server components by default; use `'use client'` only when tabs/interactivity needed (e.g. `LanguageShowcase`).
+  - Never mention specific AI model names (Claude, Anthropic, Sonnet). Use "advanced AI" / "state-of-the-art AI".
+  - No emojis. Sri Lankan identity through copy ("Sri Lanka's A/L"), font classes, and color palette.
 
 Claude Code must keep new code consistent with this tree.

@@ -29,6 +29,13 @@ const sinhala = Noto_Sans_Sinhala({ subsets: ['sinhala'], variable: '--font-sinh
 const tamil = Noto_Sans_Tamil({ subsets: ['tamil'], variable: '--font-tamil' });
 ```
 
+The CSS variables are registered as Tailwind utilities in `app/globals.css` `@theme inline` block:
+```css
+--font-sinhala: var(--font-sinhala);
+--font-tamil: var(--font-tamil);
+```
+This makes `font-sinhala` and `font-tamil` available as Tailwind class names everywhere — both in dashboard components and marketing components.
+
 ## Status Badges
 Use consistent color coding:
 - `pending` → gray
@@ -157,3 +164,49 @@ const needsPaperSelection = batch.subject_name === 'Combined Maths' && !batch.pa
 ```
 
 **Send in dispatch body**: Pass selected value as `paper_name` in the POST body. Once stored on the batch the selector is hidden.
+
+## Pricing Card Pattern — Most Popular Badge
+
+The shadcn `Card` component has `overflow-hidden` on its root element. **Never use `absolute -top-N` positioning for badges on pricing cards** — they will be clipped.
+
+Place the "Most Popular" badge **inside `CardHeader`** as the first child:
+```tsx
+<CardHeader className="text-center">
+  {plan.popular && (
+    <div className="mb-1 flex justify-center">
+      <Badge className="bg-accent text-accent-foreground hover:bg-accent">
+        Most Popular
+      </Badge>
+    </div>
+  )}
+  <CardTitle>{plan.name}</CardTitle>
+  <CardDescription>{plan.minutes} AI min/mo</CardDescription>
+</CardHeader>
+```
+
+## Landing Page (Marketing) Conventions
+
+`app/page.tsx` + `components/marketing/*` follow these rules:
+
+### Copy rules
+- **No emojis** anywhere on the landing page — they lower perceived quality.
+- **Never mention AI model names** (Claude, Anthropic, Sonnet, etc.). Use "advanced AI", "state-of-the-art AI marking engine", "high-level AI".
+- **Sri Lankan identity** through copy ("Sri Lanka's A/L curriculum"), the existing saffron/deep navy palette (`accent`/`primary`), and the `font-sinhala` / `font-tamil` classes.
+- **Pricing copy**: 1 AI minute ≈ 1 paper (not a fixed 1:1). Always say "AI min/mo", never "papers/mo".
+
+### Component structure
+- `page.tsx` — server component, imports static marketing components and `'use client'` ones.
+- `TestimonialsAndTrust.tsx` — server component; dark slate-900 section with language scripts, trust signals, CTA.
+- `LanguageShowcase.tsx` — `'use client'`; tab switcher (සිංහල / தமிழ் / English) with live feedback card in native fonts.
+- `SubjectSpotlight.tsx` — server component; Combined Maths featured card (Part A / Part B structure) + 5 coming-soon subject cards.
+
+### Section order in page.tsx
+1. Navbar (Subjects, Features, How It Works, Pricing links)
+2. Hero — split two-column: headline/language pills/CTAs left, mock AI output card right
+3. LanguageShowcase — "Mark in the Language You Teach"
+4. SubjectSpotlight — "Subjects We Mark" (`id="subjects"`)
+5. How It Works — 3-step (`id="how-it-works"`)
+6. Features — 6 cards (`id="features"`)
+7. TestimonialsAndTrust — language scripts + trust signals + CTA
+8. Pricing (`id="pricing"`)
+9. Footer

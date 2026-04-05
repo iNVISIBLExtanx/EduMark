@@ -8,6 +8,8 @@
 - `lib/ai/mark-paper.ts` — prompt builder + response parser  
 - `lib/ai/batch-dispatcher.ts` — Batch API job submission
 - `lib/ai/embeddings.ts` — OpenAI embeddings + pgvector RAG
+- `lib/ai/chunking.ts` — marking scheme text chunking for embeddings
+- `lib/ai/openai-client.ts` — OpenAI SDK singleton (lazy-init proxy pattern)
 
 ---
 
@@ -16,8 +18,7 @@
 ### 1. Prompt Caching
 The marking scheme system block MUST use `cache_control`. This is the static prefix shared across all papers in a batch.
 
-- **Direct mode (≤10 papers)**: `cache_control: { type: 'ephemeral' }` — default 5-minute TTL
-- **Batch API (>10 papers)**: `cache_control: { type: 'ephemeral', ttl: '1h' }` — 1-hour TTL for higher cache hit rate across batch processing
+- **Both modes**: `cache_control: { type: 'ephemeral', ttl: '1h' }` — 1-hour TTL used in both direct and Batch API modes. Combined Maths papers take 3-8 min each, so a 10-paper direct batch can span ~50 min — the default 5-min TTL would cause cache misses mid-batch.
 
 ### 2. Structured Outputs
 All marking calls use `output_config.format` with `zodOutputFormat()` from `@anthropic-ai/sdk/helpers/zod`. This guarantees valid JSON matching the Zod schema at the inference level — no JSON instructions needed in the prompt.
@@ -53,13 +54,13 @@ XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 | Subject | Part A | Part B |
 |---------|--------|--------|
 | Combined Maths | 10 questions, ALL compulsory, 25 marks each | 7 questions, answer BEST 5, 150 marks each |
-| Physics | 50 MCQ | 6 structured essay questions, attempt all |
-| Chemistry | Part A MCQ + structured | Part B essay |
-| Biology | Part A compulsory | Part B optional questions |
-| Economics | Section A + B | — |
-| Business Studies | Section A + B | — |
+| Physics | 4 structured questions, ALL compulsory, 20 marks each | 4 structured questions, ALL compulsory, 30 marks each |
+| Chemistry | 4 structured questions, ALL compulsory, 25 marks each | 5 questions, answer BEST 3, 100 marks each |
+| Biology | 4 structured essay, ALL compulsory, 36 marks each | 3 questions, answer BEST 2, 100 marks each |
+| Economics | 4 structured, ALL compulsory, 25 marks each | 5 questions, answer BEST 3, 100 marks each |
+| Business Studies | 4 structured, ALL compulsory, 25 marks each | 5 questions, answer BEST 3, 100 marks each |
 
-**Combined Maths `selection_rule` rule**: Must state raw marks explicitly — do NOT include any `/ 10` division arithmetic. The AI interprets division expressions as per-question mark scaling. The rule must say: "Output raw awarded_marks. Part A max_marks = 25 each, Part B max_marks = 150 each." The marking_rules block also includes rule 13 (all 10 Part A questions MUST appear) and rule 14 (max_marks must exactly match scheme values).
+**Combined Maths `selection_rule` rule**: Must state raw marks explicitly — do NOT include any `/ 10` division arithmetic. The AI interprets division expressions as per-question mark scaling. The rule must say: "Output raw awarded_marks. Part A max_marks = 25 each, Part B max_marks = 150 each." The marking_rules block includes 17 explicit rules: rules 13–14 are Combined Maths-specific (all 10 Part A questions MUST appear; max_marks must match structure exactly); rules 15–17 cover feedback format (address student directly with correct/wrong/fix structure), scheme citation requirement (every feedback must cite a specific scheme criterion), and question number confirmation.
 
 **`paper_name` is REQUIRED for Combined Maths dispatch.** If `paper_name` is not stored on the batch yet, `BatchDetail.tsx` prompts the tutor to select 'Pure (Paper I)' or 'Applied (Paper II)' before enabling the dispatch button. The selected value is sent as `paper_name` in the POST body to the dispatch route.
 
@@ -92,6 +93,12 @@ For `subject === 'Combined Maths'` only:
 - Recomputes `total_max`: always `10 * 25 + 5 * 150 = 1000` — Combined Maths paper structure is fixed regardless of how many Part B questions the student attempted (a student answering only 4 Part B questions still has total_max = 1000, not 850)
 
 For all other subjects: returns result unchanged.
+
+**`paper_name` override**: After sanitization, both `dispatchDirect` and `pollBatchResults` override the Claude-returned `paper_name` with the authoritative batch value. Claude sometimes invents its own paper name — the batch's stored `paper_name` (set by the tutor) is always the ground truth:
+```typescript
+const sanitized = sanitizeMarkingResult(parsed, subject);
+const result = paperName ? { ...sanitized, paper_name: paperName } : sanitized;
+```
 
 ### User Message — `buildUserMessageText(subject, paperName?)`
 Returns 7-step instruction text used alongside the native PDF document block:
