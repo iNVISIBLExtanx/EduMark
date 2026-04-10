@@ -84,7 +84,7 @@ const SUBJECT_CONFIGS: Record<string, SubjectPaperConfig> = {
       },
     ],
     special_notes:
-      'Write-off: if a student crosses out an answer and rewrites, mark only the final version. Marks for sub-parts (e.g. (a)(i), (a)(ii)) are summed to the question total.',
+      'Write-off: if a student crosses out an answer and rewrites, mark only the final version. Each Part A question MUST have its sub_questions array fully populated with per-sub-part marks and error-focused feedback — this is required, not optional. Marks for sub-parts are summed to the question total.',
   },
 
   // -----------------------------------------------------------------------
@@ -394,17 +394,18 @@ ${langInstructions}
 4. Award marks strictly based on the marking scheme — do not award marks for correct content that is not in the scheme unless the scheme explicitly says "accept equivalent answers".
 5. For BEST-N selection questions: mark ALL answered questions, then select the best N. Note which were selected in best_questions_selected.
 6. If a student crossed out an answer and rewrote it, mark ONLY the final rewritten version.
-7. For sub-questions (e.g. (a)(i), (a)(ii)): fill the sub_questions array with individual marks. Sum them for the question total.
+7. For sub-questions (e.g. (a)(i), (a)(ii)): fill the sub_questions array with individual marks. Sum them for the question total. For Combined Maths Part A, populating sub_questions is MANDATORY — every Part A question must have a sub_questions array showing each sub-part score and feedback. Never output a bare awarded_marks total for a Part A question without the breakdown.
 8. For diagrams or equations: award full diagram/equation marks only if fully labelled/balanced as required by the scheme.
 9. Quote the specific marking scheme criterion you used when awarding or withholding marks in the feedback field.
 10. If a page appears blank or skipped, note it in general_feedback — do not assume it means the question was not attempted.
 11. Express uncertainty explicitly: if you cannot read a word or symbol, say so in the feedback and set ocr_confidence to "low".
-12. Do NOT hallucinate answers or assume the student wrote something that is not legible in the image.
-13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question.
+12. CRITICAL — Do NOT hallucinate. Never describe, quote, or evaluate student work that is not visibly written in the script. If you cannot clearly see that the student wrote something, do not mention it at all. Uncertainty about legibility → set ocr_confidence to "low" and describe what was unclear, not what you assume it might say.
+13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question. NOTE: This rule applies ONLY to Part A — Part B questions that were not attempted must NOT appear in the output.
 14. The max_marks field MUST exactly match the paper structure. For Combined Maths: Part A questions max_marks = 25, Part B questions max_marks = 150. Never output 10 or any other value for max_marks.
-15. Write feedback addressing the student directly. Structure every feedback entry as: (1) what you did correctly and earned marks for, (2) what was wrong or missing, (3) for any missed marks, the correct answer or approach required by the scheme — cite the specific scheme step or criterion (e.g. 'per scheme step 3b').
+15. Write feedback addressing the student directly. Focus EXCLUSIVELY on errors, omissions, and missed marks — do NOT mention what the student did correctly (the marks awarded already communicate that). For every mark deducted, state: (1) exactly what was wrong or missing, (2) the specific scheme criterion not met (e.g. 'per scheme step 3b'), (3) the correct answer or method per the scheme. Keep feedback concise and actionable.
 16. NEVER write a feedback field without tracing it to a specific marking scheme criterion. Use the format: 'per scheme [criterion/step reference]'. If the scheme uses numbered steps, cite the step number. If the scheme uses lettered criteria, cite the letter.
 17. Before awarding marks, confirm the question number by cross-referencing the handwritten number with the paper structure. If the question number is ambiguous, state: 'Question number unclear — assumed Q[N] based on position' in the feedback field.
+18. Part B attendance: ONLY include Part B questions where the student has written visible work on the script. If a Part B question page is blank, shows only the question number, or has been crossed out without any rewrite, exclude it entirely from the output. Do NOT generate feedback for unattempted Part B questions. Violating this rule by fabricating reviews for unwritten questions is a critical error.
 </marking_rules>
 
 ${partInstructions}
