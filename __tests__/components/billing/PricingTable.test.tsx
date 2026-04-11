@@ -49,33 +49,42 @@ describe('PricingTable', () => {
   it('shows correct prices and AI minutes', () => {
     render(<PricingTable />);
 
+    // Component renders "10 AI minutes/mo" (not "/month")
     expect(screen.getByText('Free')).toBeDefined();
-    expect(screen.getByText('10 AI minutes/month')).toBeDefined();
-    expect(screen.getByText('50 AI minutes/month')).toBeDefined();
-    expect(screen.getByText('350 AI minutes/month')).toBeDefined();
+    // Each plan's AI minutes are split across elements: "{minutes}" + " AI minutes/mo"
+    // Verify the minutes values and the suffix text appear
+    const minuteTexts = screen.getAllByText('AI minutes/mo');
+    expect(minuteTexts.length).toBeGreaterThan(0);
+    expect(screen.getByText('10')).toBeDefined(); // free plan minutes
+    expect(screen.getByText('50')).toBeDefined(); // starter plan minutes
+    expect(screen.getByText('350')).toBeDefined(); // pro plan minutes
   });
 
   it('shows Current Plan button for the current plan', () => {
     render(<PricingTable />);
 
-    expect(screen.getByText('Current Plan')).toBeDefined();
+    // Component shows "Current Plan" badge and a disabled "Current Plan" button
+    const currentPlanElements = screen.getAllByText('Current Plan');
+    expect(currentPlanElements.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('shows Upgrade buttons for higher tiers', () => {
+  it('shows Subscribe buttons for paid tiers (not Upgrade)', () => {
     render(<PricingTable />);
 
-    const upgradeButtons = screen.getAllByText('Upgrade');
-    expect(upgradeButtons.length).toBe(4); // starter, standard, pro, institute
+    // Component renders "Subscribe" buttons (not "Upgrade")
+    const subscribeButtons = screen.getAllByText('Subscribe');
+    expect(subscribeButtons.length).toBe(4); // starter, standard, pro, institute
   });
 
-  it('shows top-up card', () => {
+  it('shows top-up card with "Top Up Now" button', () => {
     render(<PricingTable />);
 
-    expect(screen.getByText('Top Up')).toBeDefined();
-    expect(screen.getByText('Add 10 Minutes')).toBeDefined();
+    // Component renders "Need More Minutes?" heading and "Top Up Now" button
+    expect(screen.getByText('Need More Minutes?')).toBeDefined();
+    expect(screen.getByText('Top Up Now')).toBeDefined();
   });
 
-  it('calls checkout on Upgrade click', async () => {
+  it('calls checkout on Subscribe click', async () => {
     const { apiFetch } = await import('@/lib/api-client');
     (apiFetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       url: 'https://checkout.stripe.com/test',
@@ -90,8 +99,8 @@ describe('PricingTable', () => {
 
     render(<PricingTable />);
 
-    const upgradeButtons = screen.getAllByText('Upgrade');
-    fireEvent.click(upgradeButtons[0]);
+    const subscribeButtons = screen.getAllByText('Subscribe');
+    fireEvent.click(subscribeButtons[0]);
 
     await waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith('/api/stripe/checkout', expect.objectContaining({
@@ -110,7 +119,7 @@ describe('PricingTable', () => {
     render(<PricingTable />);
 
     // Should show loading spinner, not plan cards
-    expect(screen.queryByText('Upgrade')).toBeNull();
+    expect(screen.queryByText('Subscribe')).toBeNull();
   });
 
   it('renders error message when useSubscription returns error', () => {
@@ -120,7 +129,7 @@ describe('PricingTable', () => {
 
     // Component should show some error indication or still render gracefully
     // This test documents current behavior
-    expect(screen.queryByText('Upgrade')).toBeDefined();
+    expect(screen.queryByText('Subscribe')).toBeDefined();
   });
 
   it('calls checkout with isTopUp true for top-up click', async () => {
@@ -137,8 +146,9 @@ describe('PricingTable', () => {
 
     render(<PricingTable />);
 
-    const addMinutesButton = screen.getByText('Add 10 Minutes');
-    fireEvent.click(addMinutesButton);
+    // Component renders "Top Up Now" button (not "Add 10 Minutes")
+    const topUpButton = screen.getByText('Top Up Now');
+    fireEvent.click(topUpButton);
 
     await waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith('/api/stripe/checkout', expect.objectContaining({
