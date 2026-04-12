@@ -40,11 +40,38 @@ export const markingOutputFormat = zodOutputFormat(markingResultSchema);
 
 ## Marking Prompt Structure
 
+### Two-Pass Marking (Triage + Mark) — Combined Maths
+
+For Combined Maths, each paper goes through **two Claude calls** before marking results are saved:
+
+**Pass 1 — Triage** (`triagePaper(pdfBuffer)` in `lib/ai/batch-dispatcher.ts`):
+- Lightweight call: student PDF only, no marking scheme
+- System prompt: `buildTriagePrompt()` in `lib/ai/mark-paper.ts` — scans the paper and produces a JSON attendance list of which questions and sub-parts the student actually attempted
+- Output: `{ part_a: [{question_no, sub_parts}], part_b: [{question_no, sub_parts}] }`
+- Non-fatal: if triage fails, marking proceeds without triage context (graceful degradation)
+- Subjects requiring triage: `TRIAGE_SUBJECTS = new Set(['Combined Maths'])` in `lib/ai/batch-dispatcher.ts`
+
+**Pass 2 — Mark** (existing marking call):
+- Triage result is injected into the user message as an `<attendance_triage>` block
+- Claude is constrained: only output results for questions/sub-parts in the triage list
+- This prevents hallucination of unattempted questions and sub-parts
+
+```typescript
+// In dispatchDirect (and dispatchBatchAPI):
+let userMessageText = buildUserMessageText(subject, paperName);
+if (TRIAGE_SUBJECTS.has(subject)) {
+  const triage = await triagePaper(pdfBuffer); // cheap scan, no scheme
+  if (triage) {
+    userMessageText += `\n\n<attendance_triage>CRITICAL — pre-scan identified EXACTLY these questions...\n${triageContext}\n</attendance_triage>`;
+  }
+}
+```
+
 ### System Prompt (cached) — `buildSystemPrompt(subject, medium, schemeText, paperName?)`
 XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 1. Role: "You are an expert Sri Lanka G.C.E. Advanced Level {subject} examiner"
 2. `<language_rules>` — language-specific feedback instructions (see below)
-3. `<marking_rules>` — 14 explicit rules (read full paper first, Part A/B identification, BEST-N selection, sub-questions, OCR confidence, no hallucination, rule 13: all 10 Combined Maths Part A questions must appear, rule 14: max_marks must match paper structure)
+3. `<marking_rules>` — 18 explicit rules (read full paper first, Part A/B identification, BEST-N selection, sub-questions, OCR confidence, no hallucination, rule 10: Part A blanks → include with 0 marks; Part B blanks → exclude (no Rule 10/18 contradiction), rule 13: all 10 Combined Maths Part A questions must appear, rule 14: max_marks must match structure, rule 18: Part B attendance applies at question AND sub-part level)
 4. `<paper_structure subject="...">` — generated from `SUBJECT_CONFIGS` via `buildPartInstructions(subject, paperName)` (see below)
 5. `<marking_scheme>` — full scheme text from `structure_json`
 
@@ -60,7 +87,9 @@ XML-structured, subject-aware prompt in `lib/ai/mark-paper.ts`:
 | Economics | 4 structured, ALL compulsory, 25 marks each | 5 questions, answer BEST 3, 100 marks each |
 | Business Studies | 4 structured, ALL compulsory, 25 marks each | 5 questions, answer BEST 3, 100 marks each |
 
-**Combined Maths `selection_rule` rule**: Must state raw marks explicitly — do NOT include any `/ 10` division arithmetic. The AI interprets division expressions as per-question mark scaling. The rule must say: "Output raw awarded_marks. Part A max_marks = 25 each, Part B max_marks = 150 each." The marking_rules block includes 18 explicit rules: rules 13–14 are Combined Maths-specific (all 10 Part A questions MUST appear; max_marks must match structure exactly); rules 15–18 cover feedback format (error-only — no praise, marks awarded communicate correctness), scheme citation requirement (every feedback must cite a specific scheme criterion), question number confirmation, and Part B attendance (exclude unattempted Part B questions entirely — do NOT generate feedback for blank pages).
+**Combined Maths `selection_rule` rule**: Must state raw marks explicitly — do NOT include any `/ 10` division arithmetic. The AI interprets division expressions as per-question mark scaling. The rule must say: "Output raw awarded_marks. Part A max_marks = 25 each, Part B max_marks = 150 each." The marking_rules block includes 18 explicit rules: rules 13–14 are Combined Maths-specific (all 10 Part A questions MUST appear; max_marks must match structure exactly); rules 15–18 cover feedback format (error-only — no praise, marks awarded communicate correctness), scheme citation requirement, question number confirmation, and Part B attendance (exclude unattempted Part B questions AND sub-parts entirely). Rule 10 explicitly disambiguates blank-page handling: Part A blanks → include with awarded_marks=0; Part B blanks → exclude entirely (previously Rule 10 and Rule 18 contradicted each other, causing false Part B inclusions).
+
+**Part A mark rounding**: `sanitizeMarkingResult` rounds Combined Maths Part A `awarded_marks` to the nearest multiple of 5 (valid values: 0, 5, 10, 15, 20, 25 — each Part A sub-question is worth 5 marks). Any AI-output value like 22 is rounded to 20.
 
 **`paper_name` is REQUIRED for Combined Maths dispatch.** If `paper_name` is not stored on the batch yet, `BatchDetail.tsx` prompts the tutor to select 'Pure (Paper I)' or 'Applied (Paper II)' before enabling the dispatch button. The selected value is sent as `paper_name` in the POST body to the dispatch route.
 
