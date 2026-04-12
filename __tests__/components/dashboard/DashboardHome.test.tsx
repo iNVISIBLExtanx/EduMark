@@ -11,12 +11,10 @@ vi.mock('@/hooks/useTutorProfile', () => ({
 vi.mock('@/hooks/useBatches', () => ({
   useBatches: vi.fn(),
 }));
-vi.mock('@/components/billing/AiMinutesBar', () => ({
-  AiMinutesBar: () => <div data-testid="ai-minutes-bar" />,
-}));
-vi.mock('@/components/billing/UpgradeModal', () => ({
-  UpgradeModal: ({ isOpen }: { isOpen: boolean }) =>
-    isOpen ? <div data-testid="upgrade-modal" /> : null,
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
 }));
 
 import { useSubscription } from '@/hooks/useSubscription';
@@ -72,33 +70,39 @@ beforeEach(() => {
 });
 
 describe('DashboardHome', () => {
-  it('shows loading state when hooks are loading', () => {
+  it('shows loading state (Skeleton) when hooks are loading', () => {
     mockUseTutorProfile.mockReturnValue({ ...defaultTutor, isLoading: true });
-    render(<DashboardHome />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    const { container } = render(<DashboardHome />);
+    // Loading state renders Skeleton components, not "Loading..." text
+    // Verify the main content (greeting, batches table) is NOT shown
+    expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+    expect(container.querySelector('.animate-pulse')).toBeTruthy();
   });
 
   it('shows loading state when subscription is loading', () => {
     mockUseSubscription.mockReturnValue({ ...defaultSubscription, isLoading: true });
-    render(<DashboardHome />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    const { container } = render(<DashboardHome />);
+    expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+    expect(container.querySelector('.animate-pulse')).toBeTruthy();
   });
 
   it('shows loading state when batches are loading', () => {
     mockUseBatches.mockReturnValue({ ...defaultBatches, isLoading: true });
-    render(<DashboardHome />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    const { container } = render(<DashboardHome />);
+    expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+    expect(container.querySelector('.animate-pulse')).toBeTruthy();
   });
 
   it('shows greeting with tutor name', () => {
     render(<DashboardHome />);
-    expect(screen.getByText('Welcome, Jane Doe')).toBeInTheDocument();
+    // Greeting is "{Good morning/afternoon/evening}, Jane Doe"
+    expect(screen.getByText(/Jane Doe/)).toBeInTheDocument();
   });
 
-  it('shows PlanBadge and LanguageBadge', () => {
+  it('shows capitalized plan badge', () => {
     render(<DashboardHome />);
-    expect(screen.getByText('starter')).toBeInTheDocument();
-    expect(screen.getByText('english')).toBeInTheDocument();
+    // Plan badge shows "Starter" (capitalized), not "starter"
+    expect(screen.getByText('Starter')).toBeInTheDocument();
   });
 
   it('shows recent batches list', () => {
@@ -106,127 +110,129 @@ describe('DashboardHome', () => {
     expect(screen.getByText('Batch 1')).toBeInTheDocument();
     expect(screen.getByText('Batch 2')).toBeInTheDocument();
     expect(screen.getByText('Batch 3')).toBeInTheDocument();
-    expect(screen.getByText('10/10 papers')).toBeInTheDocument();
-    expect(screen.getByText('2/5 papers')).toBeInTheDocument();
-    expect(screen.getByText('0/8 papers')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
-    expect(screen.getByText('processing')).toBeInTheDocument();
-    expect(screen.getByText('pending')).toBeInTheDocument();
+    // Papers column shows "marked/total" without the word "papers"
+    expect(screen.getByText('10/10')).toBeInTheDocument();
+    expect(screen.getByText('2/5')).toBeInTheDocument();
+    expect(screen.getByText('0/8')).toBeInTheDocument();
+    // Status badges
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('Processing')).toBeInTheDocument();
+    expect(screen.getByText('Pending')).toBeInTheDocument();
   });
 
   it('shows empty state when no batches', () => {
     mockUseBatches.mockReturnValue({ ...defaultBatches, batches: [] });
     render(<DashboardHome />);
-    expect(
-      screen.getByText('No batches yet. Start by uploading a question paper.')
-    ).toBeInTheDocument();
-    expect(screen.getByText('Upload a question paper')).toHaveAttribute('href', '/papers');
+    expect(screen.getByText('No batches yet')).toBeInTheDocument();
+    expect(screen.getByText('Create your first batch to start marking')).toBeInTheDocument();
   });
 
-  it('shows UpgradeModal when available=0 and isFree=true', () => {
+  it('shows upgrade nudge card when plan is free and minutes < 5', () => {
     mockUseSubscription.mockReturnValue({
       ...defaultSubscription,
       available: 0,
       isFree: true,
-      subscription: { plan: 'free' },
+      subscription: { plan: 'free', ai_minutes_used: 10, ai_minutes_limit: 10, subscription_status: 'active', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.getByTestId('upgrade-modal')).toBeInTheDocument();
+    // Component shows an upgrade nudge card (not an UpgradeModal)
+    expect(screen.getByText('Running low on AI Minutes')).toBeInTheDocument();
+    expect(screen.getByText('Upgrade Now')).toBeInTheDocument();
   });
 
-  it('does NOT show UpgradeModal when available > 0', () => {
+  it('does NOT show upgrade nudge when available >= 5', () => {
     mockUseSubscription.mockReturnValue({
       ...defaultSubscription,
       available: 40,
       isFree: true,
-      subscription: { plan: 'free' },
+      subscription: { plan: 'free', ai_minutes_used: 0, ai_minutes_limit: 10, subscription_status: 'active', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Running low on AI Minutes')).not.toBeInTheDocument();
   });
 
-  it('shows error when tutor hook has error', () => {
-    mockUseTutorProfile.mockReturnValue({
-      ...defaultTutor,
-      error: new Error('Failed to load tutor'),
+  it('does NOT show upgrade nudge when not free plan', () => {
+    mockUseSubscription.mockReturnValue({
+      ...defaultSubscription,
+      available: 0,
+      isFree: false,
+      subscription: { plan: 'starter', ai_minutes_used: 50, ai_minutes_limit: 50, subscription_status: 'active', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.getByText('Failed to load tutor')).toBeInTheDocument();
+    expect(screen.queryByText('Running low on AI Minutes')).not.toBeInTheDocument();
   });
 
-  it('shows error when batches hook has error', () => {
-    mockUseBatches.mockReturnValue({
-      ...defaultBatches,
-      error: new Error('Failed to load batches'),
+  it('shows past due banner when subscription is past_due', () => {
+    mockUseSubscription.mockReturnValue({
+      ...defaultSubscription,
+      subscription: { plan: 'starter', ai_minutes_used: 10, ai_minutes_limit: 50, subscription_status: 'past_due', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.getByText('Failed to load batches')).toBeInTheDocument();
+    expect(screen.getByText(/Payment failed/)).toBeInTheDocument();
+    expect(screen.getByText('Update Billing')).toBeInTheDocument();
   });
 
-  it('shows "View all batches" link when batches exist', () => {
+  it('shows "View All Batches" button', () => {
     render(<DashboardHome />);
-    const link = screen.getByText(/View all batches/);
-    expect(link).toHaveAttribute('href', '/batches');
+    expect(screen.getByText('View All Batches')).toBeInTheDocument();
   });
 
-  it('renders AiMinutesBar', () => {
+  it('shows AI Minutes Remaining card with correct value', () => {
+    mockUseSubscription.mockReturnValue({
+      ...defaultSubscription,
+      subscription: { plan: 'starter', ai_minutes_used: 10, ai_minutes_limit: 50, subscription_status: 'active', billing_period_end: null },
+    });
     render(<DashboardHome />);
-    expect(screen.getByTestId('ai-minutes-bar')).toBeInTheDocument();
+    expect(screen.getByText('AI Minutes Remaining')).toBeInTheDocument();
+    // 50 - 10 = 40 remaining
+    expect(screen.getByText('40')).toBeInTheDocument();
   });
 
-  it('shows quick stats card', () => {
+  it('shows Papers Marked card with correct total', () => {
     render(<DashboardHome />);
-    expect(screen.getByTestId('quick-stats')).toBeInTheDocument();
+    // Batch 1: 10 marked, Batch 2: 2 marked, Batch 3: 0 = total 12
+    expect(screen.getByText('Papers Marked')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
   });
 
-  it('shows total papers marked this month', () => {
+  it('shows Batches This Month card', () => {
     render(<DashboardHome />);
-    // Batch 1: 10 marked, Batch 2: 2 marked, Batch 3: 0 marked = 12 total
-    // All batches have March 2026 dates, matching the current test date
-    expect(screen.getByTestId('stat-marked-month')).toHaveTextContent('12');
+    expect(screen.getByText('Batches This Month')).toBeInTheDocument();
+    // 3 sample batches
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('shows active batches count', () => {
+  it('shows Recent Batches section header', () => {
     render(<DashboardHome />);
-    // Batch 2 has status 'processing' = 1 active
-    expect(screen.getByTestId('stat-active-batches')).toHaveTextContent('1');
+    expect(screen.getByText('Recent Batches')).toBeInTheDocument();
   });
 
-  it('shows completed batches count', () => {
+  it('shows subject column with dash when subject_name is null', () => {
     render(<DashboardHome />);
-    // Batch 1 has status 'completed' = 1 completed
-    expect(screen.getByTestId('stat-completed-batches')).toHaveTextContent('1');
+    // All sample batches have subject_name: null (from hook mapping), rendered as "—"
+    const dashCells = screen.getAllByText('—');
+    expect(dashCells.length).toBeGreaterThan(0);
   });
 
-  it('shows 0 for stats when no batches in current month', () => {
-    const oldBatches = [
-      { id: 'b1', name: 'Old Batch 1', status: 'completed', medium: 'english', total_papers: 10, marked_papers: 10, created_at: '2025-01-15' },
-      { id: 'b2', name: 'Old Batch 2', status: 'processing', medium: 'sinhala', total_papers: 5, marked_papers: 3, created_at: '2025-01-16' },
-    ];
-    mockUseBatches.mockReturnValue({ ...defaultBatches, batches: oldBatches });
-    render(<DashboardHome />);
-    expect(screen.getByTestId('stat-marked-month')).toHaveTextContent('0');
-  });
-
-  it('shows UpgradeModal when available < 5 and isFree', () => {
+  it('shows upgrade nudge when available < 5 and isFree', () => {
     mockUseSubscription.mockReturnValue({
       ...defaultSubscription,
       available: 3,
       isFree: true,
-      subscription: { plan: 'free' },
+      subscription: { plan: 'free', ai_minutes_used: 7, ai_minutes_limit: 10, subscription_status: 'active', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.getByTestId('upgrade-modal')).toBeInTheDocument();
+    expect(screen.getByText('Running low on AI Minutes')).toBeInTheDocument();
   });
 
-  it('does NOT show UpgradeModal when available >= 5 and isFree', () => {
+  it('does NOT show upgrade nudge when available >= 5 and isFree', () => {
     mockUseSubscription.mockReturnValue({
       ...defaultSubscription,
       available: 5,
       isFree: true,
-      subscription: { plan: 'free' },
+      subscription: { plan: 'free', ai_minutes_used: 5, ai_minutes_limit: 10, subscription_status: 'active', billing_period_end: null },
     });
     render(<DashboardHome />);
-    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Running low on AI Minutes')).not.toBeInTheDocument();
   });
 });

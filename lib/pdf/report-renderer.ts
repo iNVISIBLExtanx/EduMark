@@ -124,9 +124,30 @@ export function buildReportHTML(params: ReportHTMLParams): string {
     return po !== 0 ? po : a.question_no - b.question_no;
   });
 
-  // Build question sections with part headings
+  // Part subtotals
+  const partAResults = sorted.filter(r => r.part === 'Part A');
+  const partBResults = sorted.filter(r => r.part === 'Part B');
+
+  const partAAwarded = partAResults.reduce((sum, r) => {
+    const eff = r.tutor_override && r.override_marks !== null ? r.override_marks : r.awarded_marks;
+    return sum + eff;
+  }, 0);
+  const partAMax = partAResults.reduce((sum, r) => sum + r.max_marks, 0);
+
+  const partBCounted = bestQuestionsSelected != null
+    ? partBResults.filter(r => bestQuestionsSelected.includes(r.question_no))
+    : partBResults;
+  const partBAwarded = partBCounted.reduce((sum, r) => {
+    const eff = r.tutor_override && r.override_marks !== null ? r.override_marks : r.awarded_marks;
+    return sum + eff;
+  }, 0);
+  const partBMax = partBCounted.reduce((sum, r) => sum + r.max_marks, 0);
+
+  // Build question sections with part headings and part subtotals
   let currentPart = '';
-  const questionSections = sorted.map((r) => {
+  const sectionParts: string[] = [];
+  for (let idx = 0; idx < sorted.length; idx++) {
+    const r = sorted[idx];
     const effectiveMarks =
       r.tutor_override && r.override_marks !== null
         ? r.override_marks
@@ -202,7 +223,7 @@ export function buildReportHTML(params: ReportHTMLParams): string {
       partHeading = `<div class="part-heading">${escapeHtml(r.part)}</div>`;
     }
 
-    return `
+    sectionParts.push(`
       ${partHeading}
       <section class="question">
         <div class="question-header">
@@ -210,13 +231,38 @@ export function buildReportHTML(params: ReportHTMLParams): string {
           <span class="marks" style="color: ${marksColor};">${effectiveMarks}/${r.max_marks}</span>
         </div>
         <div class="feedback-section">
-          <h4>Feedback</h4>
+          <h4>What to Improve</h4>
           <div class="feedback lang-text">${escapeHtml(effectiveFeedback)}</div>
         </div>
         ${subQTable}
       </section>
-    `;
-  }).join('');
+    `);
+
+    // Insert part subtotal after the last question of each part
+    const nextR = sorted[idx + 1];
+    const partChanging = !nextR || nextR.part !== r.part;
+    if (partChanging && r.part) {
+      if (r.part === 'Part A' && partAMax > 0) {
+        sectionParts.push(`
+          <div class="part-subtotal">
+            <span>Part A Total</span>
+            <span>${partAAwarded} / ${partAMax}</span>
+          </div>
+        `);
+      } else if (r.part === 'Part B' && partBMax > 0) {
+        const countLabel = bestQuestionsSelected != null
+          ? `Best ${bestQuestionsSelected.length} counted`
+          : 'Total';
+        sectionParts.push(`
+          <div class="part-subtotal">
+            <span>Part B Total (${countLabel})</span>
+            <span>${partBAwarded} / ${partBMax}</span>
+          </div>
+        `);
+      }
+    }
+  }
+  const questionSections = sectionParts.join('');
 
   const generalFeedbackBlock =
     generalFeedback && generalFeedback.trim()
@@ -383,6 +429,20 @@ export function buildReportHTML(params: ReportHTMLParams): string {
       padding: 6px 8px;
       border: 1px solid #e5e7eb;
       vertical-align: top;
+    }
+
+    .part-subtotal {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 0 24px 16px 24px;
+      padding: 10px 16px;
+      background-color: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      color: #1e40af;
     }
 
     .general-feedback {

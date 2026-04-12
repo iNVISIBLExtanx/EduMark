@@ -1,5 +1,5 @@
 import { anthropic } from './claude-client';
-import { buildSystemPrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
+import { buildSystemPrompt, buildTriagePrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
 import { getBatchById, updateBatchStatus, updateBatchClaudeBatchId, updateBatchMarkedPapers } from '@/lib/db/batches';
 import { getSubmissionsByBatch, updateSubmissionStatus, getSubmissionPdfBuffer } from '@/lib/db/submissions';
 import { getMarkingSchemeById } from '@/lib/db/marking-schemes';
@@ -23,7 +23,12 @@ export function sanitizeMarkingResult(result: MarkingResult, subject: string): M
 
   const partAQuestions = result.questions
     .filter((q) => q.part === 'Part A' || (q.part === '' && q.question_no <= 10))
-    .map((q) => ({ ...q, part: q.part || 'Part A', max_marks: 25 }));
+    .map((q) => {
+      // Combined Maths Part A: each sub-question is worth 5 marks → awarded total must be a multiple of 5
+      const rounded = Math.round(q.awarded_marks / 5) * 5;
+      const clamped = Math.min(Math.max(rounded, 0), 25);
+      return { ...q, part: q.part || 'Part A', max_marks: 25, awarded_marks: clamped };
+    });
 
   const partBQuestions = result.questions
     .filter((q) => q.part === 'Part B' || (q.part === '' && q.question_no > 10))
@@ -52,6 +57,89 @@ export function sanitizeMarkingResult(result: MarkingResult, subject: string): M
 
 /** Max output tokens — set high for Sinhala/Tamil which use ~2-3x more tokens than English */
 const MAX_OUTPUT_TOKENS = 32000;
+
+/**
+ * Subjects that benefit from a triage pre-scan.
+ * Combined Maths has complex multi-page Part A + Part B structure where
+ * single-pass marking frequently misidentifies which questions were attempted.
+ */
+const TRIAGE_SUBJECTS = new Set(['Combined Maths']);
+
+interface TriageQuestion {
+  question_no: number;
+  sub_parts: string | string[]; // "all" or array like ["(a)", "(b)"]
+}
+interface TriageResult {
+  part_a: TriageQuestion[];
+  part_b: TriageQuestion[];
+}
+
+/**
+ * Converts a triage result to a human-readable string for injection into the
+ * user message as an attendance constraint for the marking pass.
+ */
+function formatTriageForPrompt(triage: TriageResult): string {
+  const partA = triage.part_a
+    .map((q) => {
+      const parts = q.sub_parts === 'all' ? 'all sub-parts' : (q.sub_parts as string[]).join(', ');
+      return `  Part A Q${q.question_no}: ${parts}`;
+    })
+    .join('\n');
+
+  const partB =
+    triage.part_b.length > 0
+      ? triage.part_b
+          .map((q) => {
+            const parts = q.sub_parts === 'all' ? 'all sub-parts' : (q.sub_parts as string[]).join(', ');
+            return `  Part B Q${q.question_no}: ${parts}`;
+          })
+          .join('\n')
+      : '  (none — student left all Part B questions blank)';
+
+  return `Part A attempted:\n${partA}\n\nPart B attempted:\n${partB}`;
+}
+
+/**
+ * Lightweight Claude call that scans a student PDF and returns a JSON list of
+ * which questions and sub-parts were attempted. No marking scheme needed.
+ *
+ * Non-fatal: if triage fails for any reason, returns null and marking proceeds
+ * without triage context (graceful degradation).
+ */
+async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: buildTriagePrompt(),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: pdfBuffer.toString('base64'),
+              },
+            },
+            {
+              type: 'text',
+              text: 'Scan this handwritten answer script and output the attendance JSON.',
+            },
+          ],
+        },
+      ],
+    });
+    const text = response.content.find((c) => c.type === 'text');
+    if (!text || !('text' in text)) return null;
+    return JSON.parse(text.text) as TriageResult;
+  } catch {
+    console.warn('[triage] Failed to triage paper — proceeding without triage context');
+    return null;
+  }
+}
 
 /**
  * Loads batch context needed for marking: submissions, scheme, prompt.
@@ -143,6 +231,25 @@ async function dispatchDirect(
       const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
       const pdfBase64 = pdfBuffer.toString('base64');
 
+      // Triage pass: for subjects with complex multi-page structure (Combined Maths),
+      // scan the paper first to build an attendance list. This prevents the marking
+      // pass from hallucinating questions the student never attempted.
+      let userMessageText = buildUserMessageText(subject, paperName);
+      if (TRIAGE_SUBJECTS.has(subject)) {
+        const triage = await triagePaper(pdfBuffer);
+        if (triage) {
+          const triageContext = formatTriageForPrompt(triage);
+          userMessageText += `\n\n<attendance_triage>
+CRITICAL — A pre-scan of this answer script identified EXACTLY these attempted questions and sub-parts:
+${triageContext}
+
+You MUST output results ONLY for the questions and sub-parts listed above.
+For Part B: if a question is not listed, exclude it entirely. If listed sub-parts are "(a)" and "(c)" only, your sub_questions array must contain ONLY entries for (a) and (c).
+Do NOT add any question or sub-part not in this triage list.
+</attendance_triage>`;
+        }
+      }
+
       // Use streaming to avoid SDK timeout on large PDF + high max_tokens requests.
       // The SDK requires streaming for requests that may take >10 minutes.
       const stream = anthropic.messages.stream({
@@ -172,7 +279,7 @@ async function dispatchDirect(
               },
               {
                 type: 'text' as const,
-                text: buildUserMessageText(subject, paperName),
+                text: userMessageText,
               },
             ],
           },
@@ -246,6 +353,23 @@ async function dispatchBatchAPI(
       const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
       const pdfBase64 = pdfBuffer.toString('base64');
 
+      // Triage pass for Batch API (same logic as direct dispatch)
+      let userMessageText = buildUserMessageText(subject, paperName);
+      if (TRIAGE_SUBJECTS.has(subject)) {
+        const triage = await triagePaper(pdfBuffer);
+        if (triage) {
+          const triageContext = formatTriageForPrompt(triage);
+          userMessageText += `\n\n<attendance_triage>
+CRITICAL — A pre-scan of this answer script identified EXACTLY these attempted questions and sub-parts:
+${triageContext}
+
+You MUST output results ONLY for the questions and sub-parts listed above.
+For Part B: if a question is not listed, exclude it entirely. If listed sub-parts are "(a)" and "(c)" only, your sub_questions array must contain ONLY entries for (a) and (c).
+Do NOT add any question or sub-part not in this triage list.
+</attendance_triage>`;
+        }
+      }
+
       return {
         custom_id: sub.id,
         params: {
@@ -272,7 +396,7 @@ async function dispatchBatchAPI(
                 },
                 {
                   type: 'text' as const,
-                  text: buildUserMessageText(subject, paperName),
+                  text: userMessageText,
                 },
               ],
             },

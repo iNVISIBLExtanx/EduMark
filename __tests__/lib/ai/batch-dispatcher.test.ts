@@ -77,6 +77,7 @@ vi.mock('@/lib/db/marking-results', () => ({
 
 const mockBuildSystemPrompt = vi.fn();
 const mockBuildUserMessageText = vi.fn();
+const mockBuildTriagePrompt = vi.fn().mockReturnValue('triage system prompt');
 const mockMarkingOutputFormat = { type: 'json_schema', schema: {} };
 const mockMarkingResultSchema = {
   parse: vi.fn((val: unknown) => val),
@@ -85,6 +86,7 @@ const mockMarkingResultSchema = {
 vi.mock('@/lib/ai/mark-paper', () => ({
   buildSystemPrompt: (...args: unknown[]) => mockBuildSystemPrompt(...args),
   buildUserMessageText: (...args: unknown[]) => mockBuildUserMessageText(...args),
+  buildTriagePrompt: () => mockBuildTriagePrompt(),
   markingOutputFormat: { type: 'json_schema', schema: {} },
   markingResultSchema: { parse: (val: unknown) => mockMarkingResultSchema.parse(val) },
 }));
@@ -93,11 +95,13 @@ const mockBatchesCreate = vi.fn();
 const mockBatchesRetrieve = vi.fn();
 const mockBatchesResults = vi.fn();
 const mockMessagesStream = vi.fn();
+const mockMessagesCreate = vi.fn();
 
 vi.mock('@/lib/ai/claude-client', () => ({
   anthropic: {
     messages: {
       stream: (...args: unknown[]) => mockMessagesStream(...args),
+      create: (...args: unknown[]) => mockMessagesCreate(...args),
     },
     beta: {
       messages: {
@@ -406,6 +410,82 @@ describe('dispatchMarkingBatch (direct mode)', () => {
     // MOCK_MARKING_RESULT.paper_name is 'Paper II (Essay)' — should be overridden
     const savedResult = mockSaveMarkingResults.mock.calls[0][1];
     expect(savedResult.paper_name).toBe('Pure (Paper I)');
+  });
+});
+
+// ============================================================
+// triage pass — Combined Maths gets pre-scan before marking
+// ============================================================
+describe('triage pass (Combined Maths direct mode)', () => {
+  beforeEach(() => {
+    // Override to Combined Maths subject
+    mockGetQuestionPaperById.mockResolvedValue({
+      id: PAPER_ID,
+      tutor_id: TUTOR_ID,
+      title: 'CM Paper 2025',
+      subjects: { name: 'Combined Maths' },
+    });
+    mockBuildUserMessageText.mockReturnValue('7-step instructions');
+  });
+
+  it('calls messages.create (triage) before messages.stream (marking) for Combined Maths', async () => {
+    const triageJson = {
+      part_a: [{ question_no: 1, sub_parts: 'all' }],
+      part_b: [{ question_no: 11, sub_parts: ['(a)', '(b)'] }],
+    };
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify(triageJson) }],
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2); // once per submission
+    expect(mockMessagesStream).toHaveBeenCalledTimes(2);
+  });
+
+  it('injects <attendance_triage> block into user message text when triage succeeds', async () => {
+    const triageJson = {
+      part_a: [{ question_no: 1, sub_parts: 'all' }],
+      part_b: [{ question_no: 11, sub_parts: ['(a)'] }],
+    };
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify(triageJson) }],
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    const streamCall = mockMessagesStream.mock.calls[0][0];
+    const textBlock = streamCall.messages[0].content.find((b: { type: string }) => b.type === 'text');
+    expect(textBlock.text).toContain('<attendance_triage>');
+    expect(textBlock.text).toContain('Part A Q1');
+    expect(textBlock.text).toContain('Part B Q11');
+  });
+
+  it('proceeds without triage context when triage call fails (graceful degradation)', async () => {
+    mockMessagesCreate.mockRejectedValue(new Error('API error'));
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    // Marking still completes
+    expect(mockSaveMarkingResults).toHaveBeenCalledTimes(2);
+    // No attendance_triage in user message
+    const streamCall = mockMessagesStream.mock.calls[0][0];
+    const textBlock = streamCall.messages[0].content.find((b: { type: string }) => b.type === 'text');
+    expect(textBlock.text).not.toContain('<attendance_triage>');
+  });
+
+  it('does NOT call triage for non-CM subjects (Physics)', async () => {
+    // Default beforeEach sets up Physics subject in the global beforeEach
+    mockGetQuestionPaperById.mockResolvedValue({
+      id: PAPER_ID,
+      tutor_id: TUTOR_ID,
+      title: 'Physics 2025',
+      subjects: { name: 'Physics' },
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -1017,5 +1097,41 @@ describe('sanitizeMarkingResult', () => {
     const q12 = out.questions.find(q => q.question_no === 12);
     expect(q5?.max_marks).toBe(25);
     expect(q12?.max_marks).toBe(150);
+  });
+
+  it('rounds Part A awarded_marks to nearest 5 (22 → 20)', () => {
+    const result = makeResult([
+      makeQuestion({ part: 'Part A', question_no: 1, max_marks: 25, awarded_marks: 22 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const q1 = out.questions.find(q => q.question_no === 1);
+    expect(q1?.awarded_marks).toBe(20);
+  });
+
+  it('rounds Part A awarded_marks to nearest 5 (23 → 25)', () => {
+    const result = makeResult([
+      makeQuestion({ part: 'Part A', question_no: 1, max_marks: 25, awarded_marks: 23 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const q1 = out.questions.find(q => q.question_no === 1);
+    expect(q1?.awarded_marks).toBe(25);
+  });
+
+  it('clamps Part A awarded_marks to [0, 25] (27 → 25)', () => {
+    const result = makeResult([
+      makeQuestion({ part: 'Part A', question_no: 1, max_marks: 25, awarded_marks: 27 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const q1 = out.questions.find(q => q.question_no === 1);
+    expect(q1?.awarded_marks).toBe(25);
+  });
+
+  it('does not round Part B awarded_marks (Part B uses raw marks)', () => {
+    const result = makeResult([
+      makeQuestion({ part: 'Part B', question_no: 11, max_marks: 150, awarded_marks: 87 }),
+    ]);
+    const out = sanitizeMarkingResult(result, 'Combined Maths');
+    const q11 = out.questions.find(q => q.question_no === 11);
+    expect(q11?.awarded_marks).toBe(87);
   });
 });
