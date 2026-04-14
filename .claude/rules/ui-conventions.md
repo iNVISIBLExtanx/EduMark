@@ -57,7 +57,7 @@ Use `react-hook-form` + `zod` for all forms. Define zod schemas in `lib/validati
 ## Bulk Upload Pattern
 `BulkUploader.tsx` provides drag-and-drop file upload:
 - Drop zone with visual feedback (blue highlight on drag-over)
-- Client-side validation: PDF type, 20MB size limit, 50 file maximum
+- Client-side validation: PDF type, 10MB size limit, 50 file maximum
 - File list with editable student name (auto-populated from filename) + optional index number
 - Uses `apiUpload` from `lib/api-client.ts` for multipart upload
 - Calls `onUploadComplete` callback after success to trigger SWR revalidation

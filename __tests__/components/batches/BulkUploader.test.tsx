@@ -69,7 +69,7 @@ describe('BulkUploader', () => {
     expect(screen.getByText(/Drag and drop PDF files here, or/)).toBeInTheDocument();
     expect(screen.getByText('Browse files')).toBeInTheDocument();
     expect(screen.getByText('Upload Student Papers')).toBeInTheDocument();
-    expect(screen.getByText(/PDF only, max 20MB each, up to 50 files/)).toBeInTheDocument();
+    expect(screen.getByText(/PDF only, max 10MB each, up to 50 files/)).toBeInTheDocument();
   });
 
   it('adds files via file input and auto-populates student name from filename', () => {
@@ -106,14 +106,14 @@ describe('BulkUploader', () => {
     expect(screen.queryAllByTestId('file-entry')).toHaveLength(0);
   });
 
-  it('rejects files over 20MB with error message', () => {
+  it('rejects files over 10MB with error message', () => {
     render(<BulkUploader batchId={BATCH_ID} onUploadComplete={onUploadComplete} />);
 
     const input = screen.getByTestId('file-input');
-    const file = createMockPdfFile('big-file.pdf', 21);
+    const file = createMockPdfFile('big-file.pdf', 11);
     fireEvent.change(input, { target: { files: createFileList([file]) } });
 
-    expect(screen.getByTestId('upload-error')).toHaveTextContent('big-file.pdf: exceeds 20MB limit');
+    expect(screen.getByTestId('upload-error')).toHaveTextContent('big-file.pdf: exceeds 10MB limit (compress the PDF before uploading)');
     expect(screen.queryAllByTestId('file-entry')).toHaveLength(0);
   });
 
@@ -130,7 +130,7 @@ describe('BulkUploader', () => {
 
     const errorEl = screen.getByTestId('upload-error');
     expect(errorEl).toHaveTextContent('bad.txt: not a PDF file');
-    expect(errorEl).toHaveTextContent('toobig.pdf: exceeds 20MB limit');
+    expect(errorEl).toHaveTextContent('toobig.pdf: exceeds 10MB limit (compress the PDF before uploading)');
     // The valid file should still be added
     expect(screen.getAllByTestId('file-entry')).toHaveLength(1);
     expect(screen.getByText('good.pdf')).toBeInTheDocument();

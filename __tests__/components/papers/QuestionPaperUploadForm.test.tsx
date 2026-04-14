@@ -163,4 +163,45 @@ describe('QuestionPaperUploadForm', () => {
       expect(screen.getByText('Network error')).toBeDefined();
     });
   });
+
+  it('rejects question paper PDF over 20MB', async () => {
+    const user = userEvent.setup();
+    render(<QuestionPaperUploadForm />);
+
+    await fillRequiredFields(user);
+
+    // Attach an oversized paper file (21MB)
+    const bigFile = new File(['x'.repeat(21 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' });
+    Object.defineProperty(bigFile, 'size', { value: 21 * 1024 * 1024 });
+    const paperInput = screen.getByLabelText(/Question Paper PDF/);
+    Object.defineProperty(paperInput, 'files', { value: [bigFile], configurable: true });
+    fireEvent.change(paperInput);
+
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Question paper must be under 20MB/)).toBeDefined();
+    });
+  });
+
+  it('rejects marking scheme PDF over 5MB', async () => {
+    const user = userEvent.setup();
+    render(<QuestionPaperUploadForm />);
+
+    await fillRequiredFields(user);
+    attachPdfFile();
+
+    // Attach an oversized scheme file (6MB)
+    const bigScheme = new File(['x'.repeat(6 * 1024 * 1024)], 'big-scheme.pdf', { type: 'application/pdf' });
+    Object.defineProperty(bigScheme, 'size', { value: 6 * 1024 * 1024 });
+    const schemeInput = screen.getByLabelText(/Marking Scheme PDF/);
+    Object.defineProperty(schemeInput, 'files', { value: [bigScheme], configurable: true });
+    fireEvent.change(schemeInput);
+
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Marking scheme must be under 5MB/)).toBeDefined();
+    });
+  });
 });

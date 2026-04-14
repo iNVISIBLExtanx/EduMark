@@ -181,7 +181,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 - **When a test fails, investigate the source code first.** If the function has a real bug, fix the source code — do NOT patch the test to pass. The purpose of tests is to verify correctness, not to rubber-stamp existing behavior.
 - Use `stripe trigger` for real API testing after unit tests pass — some bugs (e.g. null fields on real Stripe events) are only discoverable with real API calls, not mocks
 
-## Current Test Coverage (815 tests, 57 files)
+## Current Test Coverage (823 tests, 57 files)
 | File | Tests | Coverage area |
 |------|-------|---------------|
 | `__tests__/lib/stripe/subscription.test.ts` | 7 | Customer creation, DB persist, error handling |
@@ -197,7 +197,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/lib/ai/chunking.test.ts` | 14 | Marking scheme chunking, text splitting |
 | `__tests__/lib/ai/embeddings.test.ts` | 18 | OpenAI embeddings, pgvector storage, retrieval |
 | `__tests__/lib/ai/mark-paper.test.ts` | 44 | buildSystemPrompt (subject configs, BEST-5/7, Part A/B XML, language rules, paper_name, fallbacks, no /10 in selection_rule, rules 13–18 present: Rule 10 Part A/B blank differentiation, Rule 13 Part A only, Rule 15 error-only feedback, Rule 18 Part B attendance + sub-part level exclusion, Rule 7 MANDATORY sub_questions for CM Part A, paperName filters to only matching paper, without paperName includes all papers), buildUserMessageText (7 steps, paper label, no full transcription in step 2, best-N instruction), buildTriagePrompt (attendance JSON format, no marking, handwritten work only), markingResultSchema, markingOutputFormat |
-| `__tests__/lib/ai/batch-dispatcher.test.ts` | 65 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, Part A marks rounded to nearest 5 (22→20, 23→25, clamp 27→25), Part B marks NOT rounded, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback, total_max always 1000 for CM regardless of Part B count), triage pass (CM → messages.create called before messages.stream; attendance_triage injected into user message; graceful degradation on triage failure; non-CM subjects skip triage), subject extracted from Supabase single-object FK join (not array). Poll: result parsing, status updates, partial failures, subject extracted from single-object question_papers.subjects join |
+| `__tests__/lib/ai/batch-dispatcher.test.ts` | 70 | Dispatch: billing-first, Batch API shape, cache_control, buildSystemPrompt called with paperName, sanitizeMarkingResult (wrong max_marks corrected, Part A marks rounded to nearest 5 (22→20, 23→25, clamp 27→25), Part B marks NOT rounded, BEST-5 recomputed, totals recomputed, non-CM unchanged, part inferred fallback, total_max always 1000 for CM regardless of Part B count), triage pass (CM → messages.create called before messages.stream; attendance_triage injected into user message; graceful degradation on triage failure; non-CM subjects skip triage; triage skipped when student PDF >14MB), size guards (dispatchDirect skips submission and marks failed when combined PDFs >22MB; marks only oversized failed when sizes are mixed; Batch API excludes oversized submissions; Batch API sets batch failed immediately when all oversized), subject extracted from Supabase single-object FK join (not array). Poll: result parsing, status updates, partial failures, subject extracted from single-object question_papers.subjects join |
 | `__tests__/app/api/stripe/webhook/route.test.ts` | 19 | All 5 webhook events, edge cases, security |
 | `__tests__/app/api/stripe/checkout/route.test.ts` | 10 | Auth, validation, checkout params |
 | `__tests__/app/api/stripe/portal/route.test.ts` | 6 | Auth, customer lookup, portal session |
@@ -222,7 +222,7 @@ When a mock method is called multiple times in a single flow (e.g. `.eq()` used 
 | `__tests__/components/billing/PastDueBanner.test.tsx` | 6 | Loading, visibility, portal redirect |
 | `__tests__/components/billing/UpgradeModal.test.tsx` | 5 | Open/close, links, overlay |
 | `__tests__/components/billing/PlanBadge.test.tsx` | 10 | Badge rendering per plan |
-| `__tests__/components/papers/QuestionPaperUploadForm.test.tsx` | 7 | Form render, validation, upload flow |
+| `__tests__/components/papers/QuestionPaperUploadForm.test.tsx` | 10 | Form render, validation, upload flow, rejects paper >20MB, rejects scheme >5MB |
 | `__tests__/components/papers/QuestionPaperList.test.tsx` | 8 | Table render, delete button, confirm dialog, API call, error states |
 | `__tests__/components/batches/CreateBatchDialog.test.tsx` | 10 | Form fields, paper dropdown, medium default, validation, submit, error, cancel |
 | `__tests__/components/dashboard/DashboardHome.test.tsx` | 19 | Greeting, batches, loading/error (Skeleton), quick stats, upgrade nudge card |

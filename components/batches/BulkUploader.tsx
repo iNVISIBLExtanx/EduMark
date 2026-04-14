@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Upload, X, Loader2 } from 'lucide-react';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — Claude API limit when combined with marking scheme PDF
 const MAX_FILES = 50;
 
 interface FileEntry {
@@ -45,7 +45,7 @@ export function BulkUploader({ batchId, onUploadComplete }: BulkUploaderProps) {
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
-        errors.push(`${file.name}: exceeds 20MB limit`);
+        errors.push(`${file.name}: exceeds 10MB limit (compress the PDF before uploading)`);
         continue;
       }
       const name = file.name.replace(/\.pdf$/i, '');
@@ -177,7 +177,7 @@ export function BulkUploader({ batchId, onUploadComplete }: BulkUploaderProps) {
           data-testid="file-input"
         />
         <p className="text-xs text-gray-400 mt-2">
-          PDF only, max 20MB each, up to {MAX_FILES} files
+          PDF only, max 10MB each, up to {MAX_FILES} files
         </p>
       </div>
 

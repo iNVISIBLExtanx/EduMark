@@ -52,9 +52,11 @@ vi.mock('@/lib/db/submissions', () => ({
 }));
 
 const mockGetMarkingSchemeById = vi.fn();
+const mockGetMarkingSchemePdfBuffer = vi.fn();
 
 vi.mock('@/lib/db/marking-schemes', () => ({
   getMarkingSchemeById: (...args: unknown[]) => mockGetMarkingSchemeById(...args),
+  getMarkingSchemePdfBuffer: (...args: unknown[]) => mockGetMarkingSchemePdfBuffer(...args),
 }));
 
 const mockGetQuestionPaperById = vi.fn();
@@ -167,6 +169,7 @@ beforeEach(() => {
     structure_json: { questions: [{ no: 1, marks: 10 }] },
     embeddings_done: true,
   });
+  mockGetMarkingSchemePdfBuffer.mockResolvedValue(Buffer.from('fake-scheme-pdf'));
   // Supabase FK join returns a single object, NOT an array
   mockGetQuestionPaperById.mockResolvedValue({
     id: PAPER_ID,
@@ -368,14 +371,22 @@ describe('dispatchMarkingBatch (direct mode)', () => {
     expect(call.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
   });
 
-  it('sends PDF as native document block', async () => {
+  it('sends marking scheme PDF as first cached document block and student PDF as second', async () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     const call = mockMessagesStream.mock.calls[0][0];
-    const docBlock = call.messages[0].content.find((b: { type: string }) => b.type === 'document');
-    expect(docBlock.source.type).toBe('base64');
-    expect(docBlock.source.media_type).toBe('application/pdf');
-    expect(docBlock.source.data).toBe(Buffer.from('fake-pdf').toString('base64'));
+    const docBlocks = call.messages[0].content.filter((b: { type: string }) => b.type === 'document');
+    expect(docBlocks).toHaveLength(2);
+
+    // First block: marking scheme with cache_control
+    expect(docBlocks[0].source.data).toBe(Buffer.from('fake-scheme-pdf').toString('base64'));
+    expect(docBlocks[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+
+    // Second block: student PDF (no cache_control — unique per student)
+    expect(docBlocks[1].source.type).toBe('base64');
+    expect(docBlocks[1].source.media_type).toBe('application/pdf');
+    expect(docBlocks[1].source.data).toBe(Buffer.from('fake-pdf').toString('base64'));
+    expect(docBlocks[1].cache_control).toBeUndefined();
   });
 
   it('includes output_config with structured output format', async () => {
@@ -410,6 +421,41 @@ describe('dispatchMarkingBatch (direct mode)', () => {
     // MOCK_MARKING_RESULT.paper_name is 'Paper II (Essay)' — should be overridden
     const savedResult = mockSaveMarkingResults.mock.calls[0][1];
     expect(savedResult.paper_name).toBe('Pure (Paper I)');
+  });
+
+  it('marks submission failed without calling Claude when combined PDFs exceed 22MB limit', async () => {
+    // scheme: 12MB + student: 11MB = 23MB > 22MB limit
+    const oversizedStudent = Buffer.alloc(11 * 1024 * 1024);
+    const largeScheme = Buffer.alloc(12 * 1024 * 1024);
+    mockGetMarkingSchemePdfBuffer.mockResolvedValue(largeScheme);
+    mockGetSubmissionPdfBuffer.mockResolvedValue(oversizedStudent);
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesStream).not.toHaveBeenCalled();
+    expect(mockSaveMarkingResults).not.toHaveBeenCalled();
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'failed');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'failed');
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'failed');
+  });
+
+  it('marks only oversized submissions failed, still marks valid ones when sizes are mixed', async () => {
+    const smallStudent = Buffer.from('small-pdf');   // tiny, fine
+    const bigStudent = Buffer.alloc(23 * 1024 * 1024); // 23MB alone > 22MB limit
+    const smallScheme = Buffer.alloc(0);              // no scheme → combined = student size only
+
+    mockGetMarkingSchemePdfBuffer.mockResolvedValue(smallScheme);
+    mockGetSubmissionPdfBuffer
+      .mockResolvedValueOnce(smallStudent)
+      .mockResolvedValueOnce(bigStudent);
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesStream).toHaveBeenCalledTimes(1); // only the small one
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_1, 'marked');
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(SUBMISSION_ID_2, 'failed');
+    // Mixed result → completed
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'completed');
   });
 });
 
@@ -455,7 +501,9 @@ describe('triage pass (Combined Maths direct mode)', () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     const streamCall = mockMessagesStream.mock.calls[0][0];
-    const textBlock = streamCall.messages[0].content.find((b: { type: string }) => b.type === 'text');
+    // The last text block is the instruction (earlier text blocks are document labels)
+    const allTextBlocks = streamCall.messages[0].content.filter((b: { type: string }) => b.type === 'text');
+    const textBlock = allTextBlocks[allTextBlocks.length - 1];
     expect(textBlock.text).toContain('<attendance_triage>');
     expect(textBlock.text).toContain('Part A Q1');
     expect(textBlock.text).toContain('Part B Q11');
@@ -468,9 +516,10 @@ describe('triage pass (Combined Maths direct mode)', () => {
 
     // Marking still completes
     expect(mockSaveMarkingResults).toHaveBeenCalledTimes(2);
-    // No attendance_triage in user message
+    // No attendance_triage in user message — check the instruction text block (last text block)
     const streamCall = mockMessagesStream.mock.calls[0][0];
-    const textBlock = streamCall.messages[0].content.find((b: { type: string }) => b.type === 'text');
+    const allTextBlocks = streamCall.messages[0].content.filter((b: { type: string }) => b.type === 'text');
+    const textBlock = allTextBlocks[allTextBlocks.length - 1];
     expect(textBlock.text).not.toContain('<attendance_triage>');
   });
 
@@ -486,6 +535,27 @@ describe('triage pass (Combined Maths direct mode)', () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it('skips triage (proceeds without context) when student PDF exceeds 14MB limit', async () => {
+    // 15MB student PDF → too large for messages.create (non-streaming)
+    const oversizedBuffer = Buffer.alloc(15 * 1024 * 1024);
+    mockGetSubmissionPdfBuffer.mockResolvedValue(oversizedBuffer);
+    // messages.create should NOT be called (triage skipped); stream still runs
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: 'text', text: '{}' }],
+    });
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    // Marking still proceeds (graceful degradation) — but combined check may fail here
+    // The oversized PDF alone (15MB) + scheme buffer (fake-scheme-pdf ~15B) is under 22MB,
+    // so marking itself succeeds (no triage context injected)
+    const streamCall = mockMessagesStream.mock.calls[0][0];
+    const textBlock = streamCall.messages[0].content.find((b: { type: string }) => b.type === 'text');
+    expect(textBlock.text).not.toContain('<attendance_triage>');
+    expect(mockSaveMarkingResults).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -562,6 +632,45 @@ describe('dispatchMarkingBatch (Batch API mode)', () => {
     await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
 
     expect(callOrder.indexOf('claude')).toBeLessThan(callOrder.indexOf('status'));
+  });
+
+  it('excludes oversized submissions from batch request and marks them failed', async () => {
+    const submissions = makeManySubmissions(11);
+    mockGetSubmissionsByBatch.mockResolvedValue(submissions);
+
+    // scheme: 12MB, so combined limit is 22MB — student must be < 10MB
+    const largeScheme = Buffer.alloc(12 * 1024 * 1024);
+    mockGetMarkingSchemePdfBuffer.mockResolvedValue(largeScheme);
+
+    // First submission: oversized (11MB student + 12MB scheme = 23MB > 22MB)
+    const oversized = Buffer.alloc(11 * 1024 * 1024);
+    const normal = Buffer.from('normal-pdf');
+    mockGetSubmissionPdfBuffer
+      .mockResolvedValueOnce(oversized)   // sub-0000: oversized
+      .mockResolvedValue(normal);         // rest: normal
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    // Batch created with only 10 submissions (11 - 1 oversized)
+    const batchCall = mockBatchesCreate.mock.calls[0][0];
+    expect(batchCall.requests).toHaveLength(10);
+
+    // First submission marked failed
+    expect(mockUpdateSubmissionStatus).toHaveBeenCalledWith(submissions[0].id, 'failed');
+  });
+
+  it('sets batch to failed immediately when all submissions are oversized', async () => {
+    const submissions = makeManySubmissions(11);
+    mockGetSubmissionsByBatch.mockResolvedValue(submissions);
+
+    const largeScheme = Buffer.alloc(12 * 1024 * 1024);
+    mockGetMarkingSchemePdfBuffer.mockResolvedValue(largeScheme);
+    mockGetSubmissionPdfBuffer.mockResolvedValue(Buffer.alloc(11 * 1024 * 1024)); // all oversized
+
+    await dispatchMarkingBatch(BATCH_ID, TUTOR_ID);
+
+    expect(mockBatchesCreate).not.toHaveBeenCalled();
+    expect(mockUpdateBatchStatus).toHaveBeenCalledWith(BATCH_ID, 'failed');
   });
 });
 
