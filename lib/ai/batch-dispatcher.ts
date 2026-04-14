@@ -2,7 +2,7 @@ import { anthropic } from './claude-client';
 import { buildSystemPrompt, buildTriagePrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
 import { getBatchById, updateBatchStatus, updateBatchClaudeBatchId, updateBatchMarkedPapers } from '@/lib/db/batches';
 import { getSubmissionsByBatch, updateSubmissionStatus, getSubmissionPdfBuffer } from '@/lib/db/submissions';
-import { getMarkingSchemeById } from '@/lib/db/marking-schemes';
+import { getMarkingSchemeById, getMarkingSchemePdfBuffer } from '@/lib/db/marking-schemes';
 import { getQuestionPaperById } from '@/lib/db/question-papers';
 import { checkAndDeductMinutes } from '@/lib/db/billing';
 import { saveMarkingResults } from '@/lib/db/marking-results';
@@ -59,6 +59,21 @@ export function sanitizeMarkingResult(result: MarkingResult, subject: string): M
 const MAX_OUTPUT_TOKENS = 32000;
 
 /**
+ * Maximum student PDF size for the triage pass (anthropic.messages.create — non-streaming).
+ * The non-streaming endpoint has a stricter request body limit (~20 MB base64).
+ * 14 MB raw × 4/3 ≈ 18.7 MB base64 — safe margin below that limit.
+ */
+const MAX_PDF_BYTES_FOR_TRIAGE = 14 * 1024 * 1024; // 14 MB
+
+/**
+ * Maximum combined raw bytes (scheme PDF + student PDF) per Claude API call.
+ * The streaming endpoint (messages.stream) handles up to ~30 MB base64.
+ * 22 MB raw × 4/3 ≈ 29.3 MB base64 — safe margin.
+ * If exceeded, both PDFs must be compressed before re-uploading.
+ */
+const MAX_COMBINED_PDF_BYTES = 22 * 1024 * 1024; // 22 MB
+
+/**
  * Subjects that benefit from a triage pre-scan.
  * Combined Maths has complex multi-page Part A + Part B structure where
  * single-pass marking frequently misidentifies which questions were attempted.
@@ -107,6 +122,12 @@ function formatTriageForPrompt(triage: TriageResult): string {
  * without triage context (graceful degradation).
  */
 async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
+  if (pdfBuffer.length > MAX_PDF_BYTES_FOR_TRIAGE) {
+    console.warn(
+      `[triage] Skipping triage — student PDF too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)}MB > ${MAX_PDF_BYTES_FOR_TRIAGE / 1024 / 1024}MB limit for non-streaming API). Marking will proceed without triage context.`,
+    );
+    return null;
+  }
   try {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -155,6 +176,9 @@ async function loadMarkingContext(batchId: string, tutorId: string) {
   await checkAndDeductMinutes(tutorId, pendingSubmissions.length);
 
   const scheme = await getMarkingSchemeById(batch.scheme_id);
+  // structure_json may be null if the scheme was uploaded but not yet parsed.
+  // In that case schemeText is empty and buildSystemPrompt will instruct Claude
+  // to read the marking scheme from the PDF document block sent in the user message.
   const schemeText = scheme.structure_json
     ? JSON.stringify(scheme.structure_json)
     : '';
@@ -165,7 +189,7 @@ async function loadMarkingContext(batchId: string, tutorId: string) {
   const paperName: string | undefined = (batch as unknown as { paper_name?: string | null }).paper_name ?? undefined;
   const systemPromptText = buildSystemPrompt(subjectName, batch.medium, schemeText, paperName);
 
-  return { batch, pendingSubmissions, systemPromptText, subject: subjectName, paperName };
+  return { batch, pendingSubmissions, systemPromptText, subject: subjectName, paperName, schemePdfUrl: scheme.pdf_url };
 }
 
 /**
@@ -186,11 +210,12 @@ export async function executeMarking(
   systemPromptText: string,
   subject: string,
   paperName?: string,
+  schemePdfUrl?: string,
 ): Promise<string> {
   if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
-    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName, schemePdfUrl);
   }
-  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName, schemePdfUrl);
 }
 
 /**
@@ -198,13 +223,13 @@ export async function executeMarking(
  * Kept for backward compatibility (tests, etc). Awaits full completion.
  */
 export async function dispatchMarkingBatch(batchId: string, tutorId: string): Promise<string> {
-  const { pendingSubmissions, systemPromptText, subject, paperName } = await loadMarkingContext(batchId, tutorId);
+  const { pendingSubmissions, systemPromptText, subject, paperName, schemePdfUrl } = await loadMarkingContext(batchId, tutorId);
 
   if (pendingSubmissions.length <= DIRECT_MARKING_THRESHOLD) {
-    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+    return dispatchDirect(batchId, pendingSubmissions, systemPromptText, subject, paperName, schemePdfUrl);
   }
 
-  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName);
+  return dispatchBatchAPI(batchId, pendingSubmissions, systemPromptText, subject, paperName, schemePdfUrl);
 }
 
 /**
@@ -218,8 +243,18 @@ async function dispatchDirect(
   systemPromptText: string,
   subject: string,
   paperName?: string,
+  schemePdfUrl?: string,
 ): Promise<string> {
   await updateBatchStatus(batchId, 'processing');
+
+  // Download marking scheme PDF once (shared across all submissions in this batch).
+  // It is sent as the first cached document block in each Claude call — the cache
+  // hit rate is high because it never changes within a batch.
+  // Keep the raw buffer to check combined sizes before each Claude call.
+  const schemeBuffer = schemePdfUrl
+    ? await getMarkingSchemePdfBuffer(schemePdfUrl)
+    : null;
+  const schemeBase64 = schemeBuffer ? schemeBuffer.toString('base64') : null;
 
   let markedCount = 0;
   let failedCount = 0;
@@ -229,6 +264,24 @@ async function dispatchDirect(
 
     try {
       const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
+
+      // Guard: fail fast if the combined PDF payload would exceed Claude's request limit.
+      // scheme PDF + student PDF combined raw: 22 MB raw × 4/3 ≈ 29.3 MB base64 — safe for messages.stream.
+      const combinedBytes = (schemeBuffer?.length ?? 0) + pdfBuffer.length;
+      if (combinedBytes > MAX_COMBINED_PDF_BYTES) {
+        const studentMB = (pdfBuffer.length / 1024 / 1024).toFixed(1);
+        const schemeMB = ((schemeBuffer?.length ?? 0) / 1024 / 1024).toFixed(1);
+        console.error(
+          `[dispatchDirect] Submission ${sub.id} skipped — PDFs too large for Claude API: ` +
+          `student ${studentMB}MB + scheme ${schemeMB}MB = ${(combinedBytes / 1024 / 1024).toFixed(1)}MB ` +
+          `(limit: ${MAX_COMBINED_PDF_BYTES / 1024 / 1024}MB). ` +
+          `Ask the tutor to compress and re-upload both the marking scheme and student answer script.`,
+        );
+        await updateSubmissionStatus(sub.id, 'failed');
+        failedCount++;
+        continue;
+      }
+
       const pdfBase64 = pdfBuffer.toString('base64');
 
       // Triage pass: for subjects with complex multi-page structure (Combined Maths),
@@ -250,6 +303,55 @@ Do NOT add any question or sub-part not in this triage list.
         }
       }
 
+      // Build the user message content array.
+      // Order: [label] → [scheme PDF (cached)] → [label] → [student PDF] → [instruction text]
+      // Each document is labelled with a text block immediately before it so Claude
+      // cannot confuse which PDF is the marking scheme and which is the student script.
+      // This is critical: without labels, "The attached PDF" in the instruction text
+      // is ambiguous when two PDFs are present, and Claude may mark the scheme's model
+      // answers against themselves — yielding near-perfect (but meaningless) scores.
+      type UserContentBlock =
+        | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; cache_control?: { type: 'ephemeral'; ttl: '1h' } }
+        | { type: 'text'; text: string };
+
+      const userContent: UserContentBlock[] = [];
+
+      if (schemeBase64) {
+        userContent.push({
+          type: 'text' as const,
+          text: '[DOCUMENT 1 — OFFICIAL MARKING SCHEME]: This document contains the official marking scheme with model answers and mark allocation. Read it to understand the required answers and criteria. Do NOT mark this document — it is the reference, not the student\'s work.',
+        });
+        userContent.push({
+          type: 'document' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: 'application/pdf' as const,
+            data: schemeBase64,
+          },
+          // Cache the scheme — it is identical for every paper in this batch.
+          // 1h TTL: Combined Maths 10-paper batch can span ~50 min.
+          cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+        });
+        userContent.push({
+          type: 'text' as const,
+          text: '[DOCUMENT 2 — STUDENT ANSWER SCRIPT]: This document is the handwritten student answer paper. This is the paper you must mark by comparing it against the marking scheme above.',
+        });
+      }
+
+      userContent.push({
+        type: 'document' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: 'application/pdf' as const,
+          data: pdfBase64,
+        },
+      });
+
+      userContent.push({
+        type: 'text' as const,
+        text: userMessageText,
+      });
+
       // Use streaming to avoid SDK timeout on large PDF + high max_tokens requests.
       // The SDK requires streaming for requests that may take >10 minutes.
       const stream = anthropic.messages.stream({
@@ -268,20 +370,7 @@ Do NOT add any question or sub-part not in this triage list.
         messages: [
           {
             role: 'user' as const,
-            content: [
-              {
-                type: 'document' as const,
-                source: {
-                  type: 'base64' as const,
-                  media_type: 'application/pdf' as const,
-                  data: pdfBase64,
-                },
-              },
-              {
-                type: 'text' as const,
-                text: userMessageText,
-              },
-            ],
+            content: userContent as Parameters<typeof anthropic.messages.stream>[0]['messages'][0]['content'],
           },
         ],
         output_config: {
@@ -347,19 +436,49 @@ async function dispatchBatchAPI(
   systemPromptText: string,
   subject: string,
   paperName?: string,
+  schemePdfUrl?: string,
 ): Promise<string> {
-  const requests = await Promise.all(
-    pendingSubmissions.map(async (sub) => {
-      const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
-      const pdfBase64 = pdfBuffer.toString('base64');
+  // Download marking scheme PDF once — shared across all requests in this batch.
+  const schemeBuf = schemePdfUrl
+    ? await getMarkingSchemePdfBuffer(schemePdfUrl)
+    : null;
+  const schemeBase64 = schemeBuf ? schemeBuf.toString('base64') : null;
 
-      // Triage pass for Batch API (same logic as direct dispatch)
-      let userMessageText = buildUserMessageText(subject, paperName);
-      if (TRIAGE_SUBJECTS.has(subject)) {
-        const triage = await triagePaper(pdfBuffer);
-        if (triage) {
-          const triageContext = formatTriageForPrompt(triage);
-          userMessageText += `\n\n<attendance_triage>
+  // Build requests sequentially, downloading each PDF once.
+  // Oversized submissions are excluded and marked failed before the batch is created.
+  const oversizedIds: string[] = [];
+  const requestList: NonNullable<Awaited<ReturnType<typeof buildBatchRequest>>>[] = [];
+
+  type BatchContentBlock =
+    | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string }; cache_control?: { type: 'ephemeral'; ttl: '1h' } }
+    | { type: 'text'; text: string };
+
+  async function buildBatchRequest(sub: { id: string; pdf_url: string }) {
+    const pdfBuffer = await getSubmissionPdfBuffer(sub.pdf_url);
+
+    // Size guard — same threshold as dispatchDirect
+    const combinedBytes = (schemeBuf?.length ?? 0) + pdfBuffer.length;
+    if (combinedBytes > MAX_COMBINED_PDF_BYTES) {
+      const studentMB = (pdfBuffer.length / 1024 / 1024).toFixed(1);
+      const schemeMB = ((schemeBuf?.length ?? 0) / 1024 / 1024).toFixed(1);
+      console.error(
+        `[dispatchBatchAPI] Submission ${sub.id} excluded — PDFs too large: ` +
+        `student ${studentMB}MB + scheme ${schemeMB}MB = ${(combinedBytes / 1024 / 1024).toFixed(1)}MB ` +
+        `(limit: ${MAX_COMBINED_PDF_BYTES / 1024 / 1024}MB). ` +
+        `Ask the tutor to compress and re-upload both the marking scheme and student answer script.`,
+      );
+      return null; // signals oversized
+    }
+
+    const pdfBase64 = pdfBuffer.toString('base64');
+
+    // Triage pass for Batch API (same logic as direct dispatch)
+    let userMessageText = buildUserMessageText(subject, paperName);
+    if (TRIAGE_SUBJECTS.has(subject)) {
+      const triage = await triagePaper(pdfBuffer);
+      if (triage) {
+        const triageContext = formatTriageForPrompt(triage);
+        userMessageText += `\n\n<attendance_triage>
 CRITICAL — A pre-scan of this answer script identified EXACTLY these attempted questions and sub-parts:
 ${triageContext}
 
@@ -367,56 +486,97 @@ You MUST output results ONLY for the questions and sub-parts listed above.
 For Part B: if a question is not listed, exclude it entirely. If listed sub-parts are "(a)" and "(c)" only, your sub_questions array must contain ONLY entries for (a) and (c).
 Do NOT add any question or sub-part not in this triage list.
 </attendance_triage>`;
-        }
       }
+    }
 
-      return {
-        custom_id: sub.id,
-        params: {
-          model: 'claude-sonnet-4-6' as const,
-          max_tokens: MAX_OUTPUT_TOKENS,
-          system: [
-            {
-              type: 'text' as const,
-              text: systemPromptText,
-              cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
-            },
-          ],
-          messages: [
-            {
-              role: 'user' as const,
-              content: [
-                {
-                  type: 'document' as const,
-                  source: {
-                    type: 'base64' as const,
-                    media_type: 'application/pdf' as const,
-                    data: pdfBase64,
-                  },
-                },
-                {
-                  type: 'text' as const,
-                  text: userMessageText,
-                },
-              ],
-            },
-          ],
-          output_config: {
-            format: markingOutputFormat,
-          },
+    // Build user content: [label] → [scheme PDF (cached)] → [label] → [student PDF] → [instruction text]
+    // Labels explicitly identify each document so Claude cannot confuse scheme for student script.
+    const userContent: BatchContentBlock[] = [];
+
+    if (schemeBase64) {
+      userContent.push({
+        type: 'text' as const,
+        text: '[DOCUMENT 1 — OFFICIAL MARKING SCHEME]: This document contains the official marking scheme with model answers and mark allocation. Read it to understand the required answers and criteria. Do NOT mark this document — it is the reference, not the student\'s work.',
+      });
+      userContent.push({
+        type: 'document' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: 'application/pdf' as const,
+          data: schemeBase64,
         },
-      };
-    }),
-  );
+        cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+      });
+      userContent.push({
+        type: 'text' as const,
+        text: '[DOCUMENT 2 — STUDENT ANSWER SCRIPT]: This document is the handwritten student answer paper. This is the paper you must mark by comparing it against the marking scheme above.',
+      });
+    }
 
-  const batchJob = await anthropic.beta.messages.batches.create({ requests });
+    userContent.push({
+      type: 'document' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: 'application/pdf' as const,
+        data: pdfBase64,
+      },
+    });
+
+    userContent.push({
+      type: 'text' as const,
+      text: userMessageText,
+    });
+
+    return {
+      custom_id: sub.id,
+      params: {
+        model: 'claude-sonnet-4-6' as const,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: [
+          {
+            type: 'text' as const,
+            text: systemPromptText,
+            cache_control: { type: 'ephemeral' as const, ttl: '1h' as const },
+          },
+        ],
+        messages: [
+          {
+            role: 'user' as const,
+            content: userContent,
+          },
+        ],
+        output_config: {
+          format: markingOutputFormat,
+        },
+      },
+    };
+  }
+
+  for (const sub of pendingSubmissions) {
+    const req = await buildBatchRequest(sub);
+    if (req === null) {
+      oversizedIds.push(sub.id);
+    } else {
+      requestList.push(req);
+    }
+  }
+
+  // Fail oversized submissions immediately
+  await Promise.all(oversizedIds.map((id) => updateSubmissionStatus(id, 'failed')));
+
+  if (requestList.length === 0) {
+    await updateBatchStatus(batchId, 'failed');
+    return 'batch-all-oversized';
+  }
+
+  const batchJob = await anthropic.beta.messages.batches.create({ requests: requestList });
 
   await updateBatchStatus(batchId, 'processing');
 
   await updateBatchClaudeBatchId(batchId, batchJob.id);
   await Promise.all(
-    pendingSubmissions.map((sub) =>
-      updateSubmissionStatus(sub.id, 'processing', sub.id),
+    requestList.map((req) =>
+      updateSubmissionStatus(req.custom_id, 'processing', req.custom_id),
     ),
   );
 

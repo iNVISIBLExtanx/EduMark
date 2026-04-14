@@ -81,6 +81,7 @@ describe('POST /api/batches/[id]/dispatch', () => {
       systemPromptText: 'system prompt',
       subject: 'Physics',
       paperName: undefined,
+      schemePdfUrl: 'schemes/test.pdf',
     });
     mockUpdateBatchPaperName.mockResolvedValue(undefined);
     mockExecuteMarking.mockResolvedValue('direct');
@@ -192,6 +193,7 @@ describe('POST /api/batches/[id]/dispatch', () => {
       'system prompt',
       'Physics',
       undefined,
+      'schemes/test.pdf',
     );
   });
 

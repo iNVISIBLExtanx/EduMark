@@ -411,7 +411,9 @@ ${langInstructions}
 ${partInstructions}
 
 <marking_scheme>
-${markingSchemeText}
+${markingSchemeText.trim()
+  ? markingSchemeText
+  : 'The marking scheme is provided as a PDF document in the user message (the first document block). Read it thoroughly before awarding any marks. Apply marks EXACTLY as the scheme specifies — do not invent or assume criteria not written in the scheme.'}
 </marking_scheme>
 
 Your output must be valid JSON matching the required schema. Do not include any text outside the JSON.`;
@@ -462,11 +464,12 @@ Output ONLY valid JSON in this exact format — no other text:
 
 export function buildUserMessageText(subject: string, paperName?: string): string {
   const paperLabel = paperName ? ` — ${paperName}` : '';
-  return `The attached PDF is the complete handwritten answer script for a Sri Lanka A/L ${subject}${paperLabel} paper.
+  return `The student answer script above (Document 2) is the handwritten Sri Lanka A/L ${subject}${paperLabel} paper to mark.
+Mark Document 2 against the official marking scheme (Document 1). Do NOT evaluate Document 1 — it contains only model answers.
 
-Step 1: Scan each page and identify all question numbers attempted by the student.
+Step 1: Scan each page of the student answer script (Document 2) and identify all question numbers attempted by the student.
 Step 2: For each question found, note any key working, formula, or phrase the student wrote that is directly relevant to the mark decision (brief examiner reference only — do NOT transcribe the full answer into student_answer_text).
-Step 3: Compare the student's handwritten answer against the marking scheme criteria.
+Step 3: Compare the student's handwritten answer against the marking scheme criteria in Document 1.
 Step 4: Award marks per sub-section as defined in the scheme. Sum sub-marks for the question total.
 Step 5: Apply the best-N selection rule if applicable for this subject's Part B.
 Step 6: Write specific feedback per question citing the marking scheme criterion awarded or missed.

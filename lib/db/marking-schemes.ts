@@ -111,6 +111,21 @@ export async function markEmbeddingsDone(schemeId: string) {
   if (error) throw error;
 }
 
+/**
+ * Downloads the marking scheme PDF from Supabase Storage and returns it as a Buffer.
+ * Used by the marking dispatcher to send the scheme as a document block to Claude,
+ * providing the actual marking criteria when structure_json has not been populated yet.
+ */
+export async function getMarkingSchemePdfBuffer(pdfUrl: string): Promise<Buffer> {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase.storage
+    .from('marking-schemes')
+    .download(pdfUrl);
+  if (error || !data) throw new Error('Failed to download marking scheme PDF');
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 export async function matchMarkingCriteria(
   schemeId: string,
   queryEmbedding: number[],
