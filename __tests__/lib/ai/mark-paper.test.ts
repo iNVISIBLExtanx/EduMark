@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildSystemPrompt,
+  buildTriagePrompt,
   buildUserMessageText,
   markingResultSchema,
   markingOutputFormat,
@@ -255,16 +256,40 @@ describe('Combined Maths specific prompt rules', () => {
     expect(prompt).not.toMatch(/\/ ?10/);
   });
 
-  it('system prompt contains rule 13 — all 10 Part A questions must appear', () => {
+  it('system prompt contains rule 13 — all 10 Part A questions must appear, applies ONLY to Part A', () => {
     const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
     expect(prompt).toContain('13.');
     expect(prompt).toContain('ALL 10 questions MUST appear');
+    expect(prompt).toContain('ONLY to Part A');
   });
 
   it('system prompt contains rule 14 — max_marks must be 25 or 150', () => {
     const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
     expect(prompt).toContain('14.');
     expect(prompt).toContain('max_marks');
+  });
+
+  it('system prompt contains rule 15 — error-only feedback (EXCLUSIVELY on errors, no "what you did correctly")', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('15.');
+    expect(prompt).toContain('EXCLUSIVELY on errors');
+    expect(prompt).not.toContain('what you did correctly');
+  });
+
+  it('system prompt contains rule 18 — Part B attendance rule', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('18.');
+    expect(prompt).toContain('Part B attendance');
+  });
+
+  it('Rule 7 requires sub_questions for Combined Maths Part A', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', 'scheme', 'Pure (Paper I)');
+    expect(prompt).toContain('MANDATORY');
+  });
+
+  it('Rule 18 — Part B unattempted questions excluded', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', 'scheme');
+    expect(prompt).toContain('Part B attendance');
   });
 
   it('Part A marks_per_question is 25 in paper_structure XML', () => {
@@ -281,5 +306,36 @@ describe('Combined Maths specific prompt rules', () => {
     const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
     expect(prompt).toContain('Output raw awarded_marks');
     expect(prompt).toContain('do NOT scale or divide by 10');
+  });
+
+  it('Rule 10 — Part A blank pages included (awarded_marks=0), Part B blank pages excluded', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('Part A blank pages');
+    expect(prompt).toContain('Part B blank pages');
+    expect(prompt).toContain('exclude it entirely (per Rule 18)');
+  });
+
+  it('Rule 18 — sub-part level exclusion (THIS RULE APPLIES AT THE SUB-PART LEVEL TOO)', () => {
+    const prompt = buildSystemPrompt('Combined Maths', 'english', scheme, 'Pure (Paper I)');
+    expect(prompt).toContain('SUB-PART LEVEL TOO');
+  });
+});
+
+describe('buildTriagePrompt', () => {
+  it('returns a prompt that mentions part_a and part_b JSON keys', () => {
+    const prompt = buildTriagePrompt();
+    expect(prompt).toContain('"part_a"');
+    expect(prompt).toContain('"part_b"');
+  });
+
+  it('instructs to list only questions with visible handwritten work', () => {
+    const prompt = buildTriagePrompt();
+    expect(prompt).toContain('handwritten mathematical work');
+    expect(prompt).toContain('do NOT include that question');
+  });
+
+  it('instructs NOT to mark — only produce attendance list', () => {
+    const prompt = buildTriagePrompt();
+    expect(prompt).toContain('do NOT mark');
   });
 });

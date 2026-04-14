@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_PAPER_FILE_SIZE = 20 * 1024 * 1024; // 20MB for question paper PDF
+const MAX_SCHEME_FILE_SIZE = 5 * 1024 * 1024; // 5MB — scheme PDFs must be compact for Claude API request budget
 
 export function QuestionPaperUploadForm() {
   const { subjects, isLoading: subjectsLoading } = useTutorSubjects();
@@ -45,7 +46,7 @@ export function QuestionPaperUploadForm() {
       setUploadError('Question paper must be a PDF file');
       return;
     }
-    if (paperFile.size > MAX_FILE_SIZE) {
+    if (paperFile.size > MAX_PAPER_FILE_SIZE) {
       setUploadError('Question paper must be under 20MB');
       return;
     }
@@ -59,8 +60,8 @@ export function QuestionPaperUploadForm() {
       setUploadError('Marking scheme must be a PDF file');
       return;
     }
-    if (schemeFile.size > MAX_FILE_SIZE) {
-      setUploadError('Marking scheme must be under 20MB');
+    if (schemeFile.size > MAX_SCHEME_FILE_SIZE) {
+      setUploadError('Marking scheme must be under 5MB. Export as a compact PDF (not a scanned image) to keep the AI request within limits.');
       return;
     }
 

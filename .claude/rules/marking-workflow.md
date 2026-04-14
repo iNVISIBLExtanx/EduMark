@@ -33,7 +33,7 @@ UI: "Create Batch" button in `BatchList.tsx` opens `CreateBatchDialog.tsx` with:
 - create `submissions` record with status `pending`
 Update `batches.total_papers = N`
 
-UI: `BulkUploader.tsx` component (rendered in `BatchDetail.tsx` when batch status is `pending`) provides drag-and-drop PDF upload with client-side validation (PDF only, 20MB max, 50 files max).
+UI: `BulkUploader.tsx` component (rendered in `BatchDetail.tsx` when batch status is `pending`) provides drag-and-drop PDF upload with client-side validation (PDF only, 10MB max, 50 files max).
 
 ### Step 3.5: List Submissions for a Batch
 `GET /api/batches/[id]/submissions` → returns all submissions with nested student data.

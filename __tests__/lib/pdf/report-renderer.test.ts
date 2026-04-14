@@ -286,6 +286,71 @@ describe('buildReportHTML', () => {
     expect(html).not.toContain('<h4>Student Answer</h4>');
     expect(html).not.toContain('class="student-answer');
   });
+
+  it('renders Part A subtotal after Part A questions', () => {
+    const params: ReportHTMLParams = {
+      studentName: 'Test',
+      indexNo: null,
+      subjectName: 'Combined Maths',
+      date: '2026-01-01',
+      language: 'english',
+      tutorName: 'Tutor',
+      results: [
+        { part: 'Part A', question_no: 1, max_marks: 25, awarded_marks: 20, student_answer_text: null, feedback: 'Missing step 2', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+        { part: 'Part A', question_no: 2, max_marks: 25, awarded_marks: 15, student_answer_text: null, feedback: 'Incorrect formula', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+      ],
+      bestQuestionsSelected: null,
+      totalAwarded: 35,
+      totalMax: 50,
+    };
+    const html = buildReportHTML(params);
+    expect(html).toContain('Part A Total');
+    expect(html).toContain('35 / 50');
+  });
+
+  it('renders Part B subtotal with best count label', () => {
+    const params: ReportHTMLParams = {
+      studentName: 'Test',
+      indexNo: null,
+      subjectName: 'Combined Maths',
+      date: '2026-01-01',
+      language: 'english',
+      tutorName: 'Tutor',
+      results: [
+        { part: 'Part B', question_no: 11, max_marks: 150, awarded_marks: 100, student_answer_text: null, feedback: 'Missing derivation', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+        { part: 'Part B', question_no: 12, max_marks: 150, awarded_marks: 80, student_answer_text: null, feedback: 'Wrong sign', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+        { part: 'Part B', question_no: 13, max_marks: 150, awarded_marks: 60, student_answer_text: null, feedback: 'Incomplete', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+      ],
+      bestQuestionsSelected: [11, 12],
+      totalAwarded: 180,
+      totalMax: 300,
+    };
+    const html = buildReportHTML(params);
+    expect(html).toContain('Part B Total');
+    expect(html).toContain('Best 2 counted');
+    // Only best 2 counted: 100 + 80 = 180
+    expect(html).toContain('180 / 300');
+  });
+
+  it('uses "What to Improve" as the feedback section label', () => {
+    const params: ReportHTMLParams = {
+      studentName: 'Test',
+      indexNo: null,
+      subjectName: 'Physics',
+      date: '2026-01-01',
+      language: 'english',
+      tutorName: 'Tutor',
+      results: [
+        { part: '', question_no: 1, max_marks: 20, awarded_marks: 15, student_answer_text: null, feedback: 'Some feedback', ocr_confidence: 'high', tutor_override: false, override_marks: null, override_feedback: null },
+      ],
+      bestQuestionsSelected: null,
+      totalAwarded: 15,
+      totalMax: 20,
+    };
+    const html = buildReportHTML(params);
+    expect(html).toContain('What to Improve');
+    expect(html).not.toContain('<h4>Feedback</h4>');
+  });
 });
 
 describe('generateReportPDF', () => {

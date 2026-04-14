@@ -59,11 +59,11 @@ export async function POST(
 
   try {
     // Phase 1: Validate, deduct billing, load context (awaited — errors caught here)
-    const { pendingSubmissions, systemPromptText, subject, paperName: resolvedPaperName } = await prepareMarking(batchId, user.id);
+    const { pendingSubmissions, systemPromptText, subject, paperName: resolvedPaperName, schemePdfUrl } = await prepareMarking(batchId, user.id);
 
     // Phase 2: Fire and forget — streaming/Batch API runs in background.
     // The frontend polls /api/batches/[id]/poll for progress.
-    executeMarking(batchId, pendingSubmissions, systemPromptText, subject, resolvedPaperName).catch((err) => {
+    executeMarking(batchId, pendingSubmissions, systemPromptText, subject, resolvedPaperName, schemePdfUrl).catch((err) => {
       console.error('[dispatch] Background marking failed:', err instanceof Error ? err.message : err);
     });
 

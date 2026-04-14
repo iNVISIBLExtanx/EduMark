@@ -84,7 +84,7 @@ const SUBJECT_CONFIGS: Record<string, SubjectPaperConfig> = {
       },
     ],
     special_notes:
-      'Write-off: if a student crosses out an answer and rewrites, mark only the final version. Marks for sub-parts (e.g. (a)(i), (a)(ii)) are summed to the question total.',
+      'Write-off: if a student crosses out an answer and rewrites, mark only the final version. Each Part A question MUST have its sub_questions array fully populated with per-sub-part marks and error-focused feedback — this is required, not optional. Marks for sub-parts are summed to the question total.',
   },
 
   // -----------------------------------------------------------------------
@@ -394,23 +394,26 @@ ${langInstructions}
 4. Award marks strictly based on the marking scheme — do not award marks for correct content that is not in the scheme unless the scheme explicitly says "accept equivalent answers".
 5. For BEST-N selection questions: mark ALL answered questions, then select the best N. Note which were selected in best_questions_selected.
 6. If a student crossed out an answer and rewrote it, mark ONLY the final rewritten version.
-7. For sub-questions (e.g. (a)(i), (a)(ii)): fill the sub_questions array with individual marks. Sum them for the question total.
+7. For sub-questions (e.g. (a)(i), (a)(ii)): fill the sub_questions array with individual marks. Sum them for the question total. For Combined Maths Part A, populating sub_questions is MANDATORY — every Part A question must have a sub_questions array showing each sub-part score and feedback. Never output a bare awarded_marks total for a Part A question without the breakdown.
 8. For diagrams or equations: award full diagram/equation marks only if fully labelled/balanced as required by the scheme.
 9. Quote the specific marking scheme criterion you used when awarding or withholding marks in the feedback field.
-10. If a page appears blank or skipped, note it in general_feedback — do not assume it means the question was not attempted.
+10. Part A blank pages: if a Part A question page appears blank, still include it with awarded_marks = 0 (per Rule 13 — all 10 Part A questions must appear). Part B blank pages: if a Part B question page is blank, exclude it entirely (per Rule 18). NEVER let a blank page cause you to include a Part B question that has no visible student writing.
 11. Express uncertainty explicitly: if you cannot read a word or symbol, say so in the feedback and set ocr_confidence to "low".
-12. Do NOT hallucinate answers or assume the student wrote something that is not legible in the image.
-13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question.
+12. CRITICAL — Do NOT hallucinate. Never describe, quote, or evaluate student work that is not visibly written in the script. If you cannot clearly see that the student wrote something, do not mention it at all. Uncertainty about legibility → set ocr_confidence to "low" and describe what was unclear, not what you assume it might say.
+13. For Combined Maths Part A: ALL 10 questions MUST appear in the output questions array, even if the student left the answer blank. Set awarded_marks = 0 for unattempted questions. Never omit a Part A question. NOTE: This rule applies ONLY to Part A — Part B questions that were not attempted must NOT appear in the output.
 14. The max_marks field MUST exactly match the paper structure. For Combined Maths: Part A questions max_marks = 25, Part B questions max_marks = 150. Never output 10 or any other value for max_marks.
-15. Write feedback addressing the student directly. Structure every feedback entry as: (1) what you did correctly and earned marks for, (2) what was wrong or missing, (3) for any missed marks, the correct answer or approach required by the scheme — cite the specific scheme step or criterion (e.g. 'per scheme step 3b').
+15. Write feedback addressing the student directly. Focus EXCLUSIVELY on errors, omissions, and missed marks — do NOT mention what the student did correctly (the marks awarded already communicate that). For every mark deducted, state: (1) exactly what was wrong or missing, (2) the specific scheme criterion not met (e.g. 'per scheme step 3b'), (3) the correct answer or method per the scheme. Keep feedback concise and actionable.
 16. NEVER write a feedback field without tracing it to a specific marking scheme criterion. Use the format: 'per scheme [criterion/step reference]'. If the scheme uses numbered steps, cite the step number. If the scheme uses lettered criteria, cite the letter.
 17. Before awarding marks, confirm the question number by cross-referencing the handwritten number with the paper structure. If the question number is ambiguous, state: 'Question number unclear — assumed Q[N] based on position' in the feedback field.
+18. Part B attendance: ONLY include Part B questions where the student has written visible work on the script. If a Part B question page is blank, shows only the question number, or has been crossed out without any rewrite, exclude it entirely from the output. Do NOT generate feedback for unattempted Part B questions. Violating this rule by fabricating reviews for unwritten questions is a critical error. THIS RULE APPLIES AT THE SUB-PART LEVEL TOO: if a student attempted Q17 but only wrote answers for parts (a) and (c), your sub_questions array MUST contain ONLY entries for (a) and (c) — never generate a sub_questions entry for a sub-part where no student writing is visible on the page.
 </marking_rules>
 
 ${partInstructions}
 
 <marking_scheme>
-${markingSchemeText}
+${markingSchemeText.trim()
+  ? markingSchemeText
+  : 'The marking scheme is provided as a PDF document in the user message (the first document block). Read it thoroughly before awarding any marks. Apply marks EXACTLY as the scheme specifies — do not invent or assume criteria not written in the scheme.'}
 </marking_scheme>
 
 Your output must be valid JSON matching the required schema. Do not include any text outside the JSON.`;
@@ -426,13 +429,47 @@ Your output must be valid JSON matching the required schema. Do not include any 
  * Kept separate from document construction so batch-dispatcher.ts
  * can embed it alongside the native PDF document block.
  */
+/**
+ * Builds the system prompt for the triage (attendance scan) pass.
+ * This is a lightweight Claude call with no marking scheme — just scans the
+ * student PDF to produce a JSON list of which questions and sub-parts were attempted.
+ * The triage result is fed back into the marking call as an attendance constraint.
+ */
+export function buildTriagePrompt(): string {
+  return `You are scanning a handwritten Sri Lanka A/L Combined Maths answer script.
+Your ONLY task is to produce a JSON attendance list — do NOT mark or evaluate anything.
+
+<triage_rules>
+1. Scan every page of the PDF from front to back.
+2. For each question number where you see handwritten mathematical work, record it.
+3. For Part A questions (Q1–Q10): record which sub-parts have visible student writing (e.g. "(a)", "(b)", "(c)", "(d)", "(e)"). If all sub-parts are clearly present and have writing, write "all".
+4. For Part B questions (Q11–Q17): ONLY list a question if the student has genuinely written mathematical work (not just the printed question number or a blank page). Record only the sub-parts (e.g. "(a)", "(b)") where the student has actually written working.
+5. If a page is blank or has only the printed question number with no handwritten working, do NOT include that question or sub-part.
+6. If you cannot clearly determine a question number, skip it rather than guessing.
+</triage_rules>
+
+Output ONLY valid JSON in this exact format — no other text:
+{
+  "part_a": [
+    { "question_no": 1, "sub_parts": "all" },
+    { "question_no": 2, "sub_parts": ["(a)", "(b)", "(c)"] }
+  ],
+  "part_b": [
+    { "question_no": 11, "sub_parts": ["(a)"] },
+    { "question_no": 14, "sub_parts": ["(a)", "(b)"] },
+    { "question_no": 17, "sub_parts": ["(a)", "(c)"] }
+  ]
+}`;
+}
+
 export function buildUserMessageText(subject: string, paperName?: string): string {
   const paperLabel = paperName ? ` — ${paperName}` : '';
-  return `The attached PDF is the complete handwritten answer script for a Sri Lanka A/L ${subject}${paperLabel} paper.
+  return `The student answer script above (Document 2) is the handwritten Sri Lanka A/L ${subject}${paperLabel} paper to mark.
+Mark Document 2 against the official marking scheme (Document 1). Do NOT evaluate Document 1 — it contains only model answers.
 
-Step 1: Scan each page and identify all question numbers attempted by the student.
+Step 1: Scan each page of the student answer script (Document 2) and identify all question numbers attempted by the student.
 Step 2: For each question found, note any key working, formula, or phrase the student wrote that is directly relevant to the mark decision (brief examiner reference only — do NOT transcribe the full answer into student_answer_text).
-Step 3: Compare the student's handwritten answer against the marking scheme criteria.
+Step 3: Compare the student's handwritten answer against the marking scheme criteria in Document 1.
 Step 4: Award marks per sub-section as defined in the scheme. Sum sub-marks for the question total.
 Step 5: Apply the best-N selection rule if applicable for this subject's Part B.
 Step 6: Write specific feedback per question citing the marking scheme criterion awarded or missed.

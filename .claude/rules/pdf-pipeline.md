@@ -43,6 +43,26 @@ export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> { ... 
 Used during bulk upload (`app/api/submissions/upload/route.ts`) to validate page counts. If PDF has >20 pages, warn tutor (likely incorrect upload).
 
 ## File Size Limits
-- Max 20MB per PDF submission
+
+### Student Submission PDFs (`BulkUploader.tsx`)
+- Max **10MB** per student PDF (client-side validation before upload)
 - Max 50 files per bulk upload batch
-- Validate client-side in BulkUploader.tsx before upload starts
+
+### Marking Scheme PDFs (`QuestionPaperUploadForm.tsx`)
+- Max **5MB** per scheme PDF — must be a compact digital PDF, not a scanned image
+- Scanned/image-based schemes are too large for the Claude API budget
+
+### Server-Side Combined Size Guard (`lib/ai/batch-dispatcher.ts`)
+Two constants enforce limits at dispatch time, independent of client-side checks:
+
+```typescript
+const MAX_PDF_BYTES_FOR_TRIAGE = 14 * 1024 * 1024; // 14MB — safe for messages.create (non-streaming)
+const MAX_COMBINED_PDF_BYTES  = 22 * 1024 * 1024; // 22MB — safe for messages.stream (streaming)
+```
+
+- **Triage pass** (`triagePaper`): student PDF > 14MB → triage skipped, marking proceeds without triage context (graceful degradation)
+- **Marking pass** (`dispatchDirect` / `dispatchBatchAPI`): scheme + student combined > 22MB → submission marked `failed` immediately with a clear server log; tutor is asked to compress and re-upload both files
+
+These limits exist because Claude's API rejects oversized base64 payloads:
+- `messages.create()` (triage, non-streaming): ~20MB base64 limit → 14MB raw PDF = ~18.7MB base64
+- `messages.stream()` (marking, streaming): ~30MB base64 limit → 22MB raw combined = ~29.3MB base64

@@ -52,13 +52,19 @@ Include inline CSS only (no external fonts via URL — embed base64 fonts for Si
 <div class="part-heading">Part A</div>   <!-- only when results have part set -->
 <section class="question" v-for="q in partAQuestions">
   <h3>Question {q.question_no} [badges: OCR, Override, Best5/NotCounted] [{marks}/{max}]</h3>
-  <!-- student_answer_text is NOT rendered — field retained in params for future use but the student answer gray box was removed to reduce visual noise -->
-  <div class="feedback">{q.feedback}</div>  <!-- in tutor's language -->
+  <!-- student_answer_text is NOT rendered — field retained in params for future use -->
+  <div class="feedback">{q.feedback}</div>  <!-- labelled "What to Improve", in tutor's language -->
   <table class="sub-questions">...</table>  <!-- only when sub_questions present -->
 </section>
 
+<!-- Part subtotal row after last question of Part A -->
+<div class="part-subtotal">Part A Total | {partAAwarded} / {partAMax}</div>
+
 <div class="part-heading">Part B</div>
 <section class="question" ...>  <!-- same structure, + Best5/NotCounted badges -->
+
+<!-- Part subtotal row after last question of Part B -->
+<div class="part-subtotal">Part B Total (Best N counted) | {partBAwarded} / {partBMax}</div>
 
 <div class="general-feedback">...</div>  <!-- only when generalFeedback non-empty -->
 
