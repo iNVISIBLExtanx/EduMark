@@ -4,7 +4,7 @@ import { createMarkingScheme } from '@/lib/db/marking-schemes';
 import { markingSchemeSchema } from '@/lib/validations/schemas';
 import { NextResponse } from 'next/server';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB — matches client-side validation in QuestionPaperUploadForm.tsx
 
 export async function POST(req: Request) {
   const supabase = await createServerClient();
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'File must be a PDF' }, { status: 400 });
   }
   if (file.size > MAX_FILE_SIZE) {
-    return NextResponse.json({ error: 'File must be under 20MB' }, { status: 400 });
+    return NextResponse.json({ error: 'File must be under 5MB' }, { status: 400 });
   }
 
   // Validate metadata

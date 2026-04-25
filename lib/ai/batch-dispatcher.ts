@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { anthropic } from './claude-client';
 import { buildSystemPrompt, buildTriagePrompt, buildUserMessageText, markingOutputFormat, markingResultSchema, type MarkingResult } from './mark-paper';
 import { getBatchById, updateBatchStatus, updateBatchClaudeBatchId, updateBatchMarkedPapers } from '@/lib/db/batches';
@@ -11,31 +12,110 @@ import { saveMarkingResults } from '@/lib/db/marking-results';
 const DIRECT_MARKING_THRESHOLD = 10;
 
 /**
+ * Normalises a raw `part` string from Claude into the canonical 'Part A' | 'Part B'.
+ *
+ * Claude occasionally outputs non-canonical labels such as 'A', 'B', null, '',
+ * or 'Part A / Part B'. Live DB analysis (2026-04) found 147 rows with these labels,
+ * causing 40% of Combined Maths submissions to silently lose all Part A questions
+ * from their totals. This function is the single fix point for that class of bug.
+ */
+export function normalizePart(part: string | null | undefined, questionNo: number): 'Part A' | 'Part B' {
+  if (part === 'Part A' || part === 'A') return 'Part A';
+  if (part === 'Part B' || part === 'B') return 'Part B';
+  // Non-canonical labels ('Part A / Part B', null, '') → infer from question number.
+  // Combined Maths: Q1–Q10 are Part A, Q11–Q17 are Part B.
+  return questionNo <= 10 ? 'Part A' : 'Part B';
+}
+
+/**
  * Defense-in-depth post-parse correction for Combined Maths marking results.
  *
  * The AI prompt instructs correct max_marks and BEST-5 selection, but as a
  * server-side safety net we enforce them here regardless of AI output.
  *
- * For all other subjects: no-op, returns result unchanged.
+ * Fixes applied (in order):
+ *  1. Part label normalisation — converts 'A', 'B', null, 'Part A / Part B' to canonical values
+ *  2. Sub-questions sum reconciliation — uses sub_questions total as canonical awarded_marks when available
+ *  3. max_marks enforcement — Part A → 25, Part B → 150
+ *  4. Part A completeness — pads any missing Q1–Q10 with awarded_marks = 0
+ *  5. Best-5 selection — deterministic sort (marks DESC, question_no ASC), guards Q11+ only
+ *  6. Totals recompute — total_awarded from Part A + best-5 Part B; total_max always 1000
+ *
+ * For all other subjects: applies bounds enforcement only (awarded_marks clamped to [0, max_marks]).
  */
 export function sanitizeMarkingResult(result: MarkingResult, subject: string): MarkingResult {
-  if (subject !== 'Combined Maths') return result;
+  if (subject !== 'Combined Maths') {
+    // For all subjects: clamp awarded_marks to valid range [0, max_marks]
+    return {
+      ...result,
+      questions: result.questions.map((q) => ({
+        ...q,
+        awarded_marks: Math.min(Math.max(q.awarded_marks, 0), q.max_marks),
+      })),
+    };
+  }
 
-  const partAQuestions = result.questions
-    .filter((q) => q.part === 'Part A' || (q.part === '' && q.question_no <= 10))
+  // Step 1: Normalise all part labels before partitioning
+  const normalized = result.questions.map((q) => ({
+    ...q,
+    part: normalizePart(q.part, q.question_no),
+  }));
+
+  // Step 2: Partition into Part A and Part B
+  const partAQuestions = normalized
+    .filter((q) => q.part === 'Part A')
     .map((q) => {
-      // Combined Maths Part A: each sub-question is worth 5 marks → awarded total must be a multiple of 5
-      const rounded = Math.round(q.awarded_marks / 5) * 5;
-      const clamped = Math.min(Math.max(rounded, 0), 25);
-      return { ...q, part: q.part || 'Part A', max_marks: 25, awarded_marks: clamped };
+      // Sub-questions sum is the ground truth when available (more precise than the rolled-up total).
+      // Fall back to rounding to the nearest 5 when sub_questions are absent
+      // (each Part A sub-part is worth 5 marks in the Combined Maths structure).
+      let canonical: number;
+      if (q.sub_questions && q.sub_questions.length > 0) {
+        const subTotal = q.sub_questions.reduce((s, sq) => s + sq.awarded_marks, 0);
+        canonical = Math.min(Math.max(subTotal, 0), 25);
+      } else {
+        const rounded = Math.round(q.awarded_marks / 5) * 5;
+        canonical = Math.min(Math.max(rounded, 0), 25);
+      }
+      return { ...q, max_marks: 25, awarded_marks: canonical };
     });
 
-  const partBQuestions = result.questions
-    .filter((q) => q.part === 'Part B' || (q.part === '' && q.question_no > 10))
-    .map((q) => ({ ...q, part: q.part || 'Part B', max_marks: 150 }));
+  const partBQuestions = normalized
+    .filter((q) => q.part === 'Part B')
+    .map((q) => ({
+      ...q,
+      max_marks: 150,
+      awarded_marks: Math.min(Math.max(q.awarded_marks, 0), 150),
+    }));
 
-  // Select best 5 Part B questions by awarded_marks descending
-  const sortedPartB = [...partBQuestions].sort((a, b) => b.awarded_marks - a.awarded_marks);
+  // Step 3: Pad any missing Part A questions (Q1–Q10) with awarded_marks = 0.
+  // Rule 13 requires all 10 to appear; if Claude missed any, fill them in here.
+  const existingPartANos = new Set(partAQuestions.map((q) => q.question_no));
+  for (let qno = 1; qno <= 10; qno++) {
+    if (!existingPartANos.has(qno)) {
+      console.warn(`[sanitize] Combined Maths Part A Q${qno} missing from AI output — padding with 0 marks`);
+      partAQuestions.push({
+        part: 'Part A',
+        question_no: qno,
+        max_marks: 25,
+        awarded_marks: 0,
+        feedback: 'Question not found in AI output — recorded as 0. Please review manually.',
+        ocr_confidence: 'low',
+        sub_questions: [],
+      });
+    }
+  }
+  partAQuestions.sort((a, b) => a.question_no - b.question_no);
+
+  // Step 4: Select best 5 Part B questions.
+  // Guard: only consider questions with question_no > 10 (defence against Part A Qs
+  // being mis-labelled as Part B before normalisation fixed them in earlier versions).
+  // Tie-breaking: marks DESC, then question_no ASC (deterministic, lower Q first).
+  const validPartBQuestions = partBQuestions.filter((q) => q.question_no > 10);
+  const sortedPartB = [...validPartBQuestions].sort((a, b) =>
+    b.awarded_marks !== a.awarded_marks
+      ? b.awarded_marks - a.awarded_marks
+      : a.question_no - b.question_no,
+  );
   const best5 = sortedPartB.slice(0, 5);
   const best5Nos = best5.map((q) => q.question_no);
 
@@ -80,14 +160,15 @@ const MAX_COMBINED_PDF_BYTES = 22 * 1024 * 1024; // 22 MB
  */
 const TRIAGE_SUBJECTS = new Set(['Combined Maths']);
 
-interface TriageQuestion {
-  question_no: number;
-  sub_parts: string | string[]; // "all" or array like ["(a)", "(b)"]
-}
-interface TriageResult {
-  part_a: TriageQuestion[];
-  part_b: TriageQuestion[];
-}
+const triageQuestionSchema = z.object({
+  question_no: z.number().int().min(1).max(17),
+  sub_parts: z.union([z.literal('all'), z.array(z.string())]),
+});
+const triageResultSchema = z.object({
+  part_a: z.array(triageQuestionSchema),
+  part_b: z.array(triageQuestionSchema),
+});
+type TriageResult = z.infer<typeof triageResultSchema>;
 
 /**
  * Converts a triage result to a human-readable string for injection into the
@@ -121,6 +202,8 @@ function formatTriageForPrompt(triage: TriageResult): string {
  * Non-fatal: if triage fails for any reason, returns null and marking proceeds
  * without triage context (graceful degradation).
  */
+const MAX_TRIAGE_ATTEMPTS = 2;
+
 async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
   if (pdfBuffer.length > MAX_PDF_BYTES_FOR_TRIAGE) {
     console.warn(
@@ -128,38 +211,41 @@ async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
     );
     return null;
   }
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: buildTriagePrompt(),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: pdfBuffer.toString('base64'),
+  for (let attempt = 1; attempt <= MAX_TRIAGE_ATTEMPTS; attempt++) {
+    try {
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: buildTriagePrompt(),
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: 'application/pdf',
+                  data: pdfBuffer.toString('base64'),
+                },
               },
-            },
-            {
-              type: 'text',
-              text: 'Scan this handwritten answer script and output the attendance JSON.',
-            },
-          ],
-        },
-      ],
-    });
-    const text = response.content.find((c) => c.type === 'text');
-    if (!text || !('text' in text)) return null;
-    return JSON.parse(text.text) as TriageResult;
-  } catch {
-    console.warn('[triage] Failed to triage paper — proceeding without triage context');
-    return null;
+              {
+                type: 'text',
+                text: 'Scan this handwritten answer script and output the attendance JSON.',
+              },
+            ],
+          },
+        ],
+      });
+      const text = response.content.find((c) => c.type === 'text');
+      if (!text || !('text' in text)) continue;
+      return triageResultSchema.parse(JSON.parse(text.text));
+    } catch (err) {
+      console.warn(`[triage] Attempt ${attempt}/${MAX_TRIAGE_ATTEMPTS} failed:`, err);
+    }
   }
+  console.warn('[triage] All attempts failed — proceeding without triage context');
+  return null;
 }
 
 /**
