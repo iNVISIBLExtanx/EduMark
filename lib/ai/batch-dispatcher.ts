@@ -160,14 +160,15 @@ const MAX_COMBINED_PDF_BYTES = 22 * 1024 * 1024; // 22 MB
  */
 const TRIAGE_SUBJECTS = new Set(['Combined Maths']);
 
-interface TriageQuestion {
-  question_no: number;
-  sub_parts: string | string[]; // "all" or array like ["(a)", "(b)"]
-}
-interface TriageResult {
-  part_a: TriageQuestion[];
-  part_b: TriageQuestion[];
-}
+const triageQuestionSchema = z.object({
+  question_no: z.number().int().min(1).max(17),
+  sub_parts: z.union([z.literal('all'), z.array(z.string())]),
+});
+const triageResultSchema = z.object({
+  part_a: z.array(triageQuestionSchema),
+  part_b: z.array(triageQuestionSchema),
+});
+type TriageResult = z.infer<typeof triageResultSchema>;
 
 /**
  * Converts a triage result to a human-readable string for injection into the
@@ -201,6 +202,8 @@ function formatTriageForPrompt(triage: TriageResult): string {
  * Non-fatal: if triage fails for any reason, returns null and marking proceeds
  * without triage context (graceful degradation).
  */
+const MAX_TRIAGE_ATTEMPTS = 2;
+
 async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
   if (pdfBuffer.length > MAX_PDF_BYTES_FOR_TRIAGE) {
     console.warn(
@@ -208,38 +211,41 @@ async function triagePaper(pdfBuffer: Buffer): Promise<TriageResult | null> {
     );
     return null;
   }
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: buildTriagePrompt(),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: pdfBuffer.toString('base64'),
+  for (let attempt = 1; attempt <= MAX_TRIAGE_ATTEMPTS; attempt++) {
+    try {
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: buildTriagePrompt(),
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: 'application/pdf',
+                  data: pdfBuffer.toString('base64'),
+                },
               },
-            },
-            {
-              type: 'text',
-              text: 'Scan this handwritten answer script and output the attendance JSON.',
-            },
-          ],
-        },
-      ],
-    });
-    const text = response.content.find((c) => c.type === 'text');
-    if (!text || !('text' in text)) return null;
-    return JSON.parse(text.text) as TriageResult;
-  } catch {
-    console.warn('[triage] Failed to triage paper — proceeding without triage context');
-    return null;
+              {
+                type: 'text',
+                text: 'Scan this handwritten answer script and output the attendance JSON.',
+              },
+            ],
+          },
+        ],
+      });
+      const text = response.content.find((c) => c.type === 'text');
+      if (!text || !('text' in text)) continue;
+      return triageResultSchema.parse(JSON.parse(text.text));
+    } catch (err) {
+      console.warn(`[triage] Attempt ${attempt}/${MAX_TRIAGE_ATTEMPTS} failed:`, err);
+    }
   }
+  console.warn('[triage] All attempts failed — proceeding without triage context');
+  return null;
 }
 
 /**
