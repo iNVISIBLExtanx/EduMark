@@ -99,4 +99,4 @@ M.Sc. Data Science (Trent University, Canada) · IEEE Published · Founder, Claz
 
 ---
 
-**Interested in implementing EduMark for your institution?** Contact: manodhya@clazy.online
+**Interested in implementing EduMark for your institution?** Contact: mopallage@gmail.com
